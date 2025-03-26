@@ -1,0 +1,1664 @@
+---
+title: "MIR 2025 Consolidation"
+format: html
+editor: visual
+---
+
+# MIR Consolidation 2025
+
+This Quatro file will consolidate the monthly inventory report (MIR) 2025. This new format follow a more user-friendly interface with appropriate code blocks you will need to execute and allows space for manual cleaning.
+
+## Part 1: Facility Name
+
+### Step 1.1: Prepare Libraries
+
+You only need to run this code if this is your first time to install the libraries in your computer. You can remove "\#" if you want to run this.
+
+```{r}
+# Prepare libraries ------------------
+
+# install.packages('readxl')
+# install.packages('purrr')
+# install.packages('dplyr')
+# install.packages('tidyr')
+# install.packages('stringr')
+# install.packages('writexl')
+# install.packages('lubridate')
+# install.packages('openxlsx')
+# install.packages('readr')
+
+print("End of Step 1.1")
+```
+
+### Step 1.2: Set up your workspace
+
+In this next block, we will call out our needed libraries, set up our directory
+
+```{r,echo=FALSE,results='hide',message=FALSE}
+
+# Call needed libraries 
+
+library(readxl)
+library(purrr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(writexl)
+library(lubridate)
+library(openxlsx)
+library(janitor)
+library(readr)
+
+# Define the folder path where MIR reports are stored
+folder_path <- getwd() 
+    
+# List all Excel files in the folder, excluding temporary files starting with '~$'
+# NOTE: Ensure all files names are clean with format "Region - Hub code"
+excel_files <- list.files(path = folder_path, pattern = "^[^~].*\\.xlsx$", full.names = TRUE)
+
+# Print the count of captured Excel files
+cat("Number of Excel files captured:", length(excel_files), "\n")
+```
+
+#### -\> REVIEW: Make sure the "excel_files" on the right matches your expected files to be loaded.
+
+### Step 1.3: Set the reporting month {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+#### -\> REVIEW Set the reporting month
+
+replace the month in "[Mon]{.underline}" using the notation below
+
+```{r}
+
+# Define Reporting Month 
+reporting_month <- "Feb" # <- replace this 
+
+#Select from the following  
+#Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec
+
+
+# Define Past 3 months
+p3m <- c("Dec24","Jan","Feb") # <- replace this 
+
+#Select from the following  
+#Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec
+```
+
+### Step 1.4: Extract facility names from General Input Sheet
+
+After running this next block, it will summarize which information are missing. You can open the dataframe to identify which files needs correction.
+
+```{r}
+
+read_general_input_sheet <- function(file) {
+  print(basename(file))  # Debugging: Show file name
+  #print(excel_sheets(file))  # Debugging: Show sheet names
+  
+# Read the entire sheet
+general_input_sheet <- read_excel(file, sheet = "General Input", col_names = FALSE, .name_repair = "minimal")
+  
+# Extract facility name (row 1, columns 2 to 8)
+facility_name <- general_input_sheet[1, 2] %>%
+  as.character() %>%
+  na.omit()
+
+if (length(facility_name) == 0 || is.na(facility_name)) {
+  warning(paste("Facility name not found in file:", file))
+  facility_name <- ""
+}
+
+# Extract additional fields from B3:H5
+facility_address <- general_input_sheet[2, 2] %>% as.character()
+city <- general_input_sheet[3, 2] %>% as.character()
+province <- general_input_sheet[3, 5] %>% as.character()  
+region <- general_input_sheet[3, 7] %>% as.character() 
+
+# Create a data frame with extracted information
+facility_info_df <- data.frame(
+  FileName = basename(file),
+  FacilityName = toupper(facility_name),
+  rptd_address = toupper(facility_address),
+  rptd_city = toupper(city),
+  rptd_prov = toupper(province),
+  rptd_reg = toupper(region)
+)
+
+return(facility_info_df)
+}
+
+facility_names <- map(excel_files, read_general_input_sheet)
+
+# Combine into a single data frame
+faci_name <- do.call(rbind, facility_names)
+
+# Split `FileName` into `region` and `hub` based on " - "
+faci_name <- faci_name %>%
+  mutate(
+    filename = FileName,  # Retain the original FileName for processing
+    region = substr(FileName, 1, 3),  # Extract the first 3 characters for 'region'
+    hub = str_trim(substr(FileName, 5, nchar(FileName)))) %>%  # Extract from 5th character onward and trim spaces
+  
+  # Remove the leading " - " in hub and clean up the extension
+  mutate(
+    hub = str_replace(hub, "- ", ""),  # Remove leading " - " from hub
+    hub = str_replace(hub, "– ", ""),  # Remove leading "–  " from hub
+    hub = str_replace(hub, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from hub
+    FileName = str_replace(FileName, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from FileName
+    region = str_replace_all(region, "R0", "RO")) %>%  # Replace all '0' with 'O' in the 'region' column
+  select(region, hub, FileName, FacilityName, rptd_reg, rptd_prov, rptd_city, rptd_address) %>%
+  mutate(FacilityName = ifelse(FacilityName == "NA", NA, FacilityName)) %>%
+  mutate(rptd_city = ifelse(rptd_city == "NA", NA, rptd_city)) %>%
+  mutate(rptd_address = ifelse(rptd_address == "NA", NA, rptd_address))
+
+rm(facility_names)
+
+colSums(is.na(faci_name))
+
+```
+
+DATA FRAME CREATED: **faci_name**
+
+-   *region*, *hub, FacilityName* - based on the Excel FileName
+
+-   *FacilityName, rptd_reg, rptd_prov, rptd_city, rptd_addresshub* - based on General Input Sheet
+
+Result for FacilityName should be 0
+
+#### -\> REVIEW: Make sure all files have FacilityName. After cleaning, you need to rerun from [Step 1.2: Set up your workspace]
+
+### Step 1.5: Review FacilityName for any duplicates
+
+As a quick solution, I took the facility names from the 2024 consolidation based on the FileName, and added them in the code. you can add edits here too if these files are recurring issues. Also, this next code block will identify facilities that appeared more than once in the folder. Review duplicate submissions, and keep latest files.
+
+```{r}
+faci_name <- faci_name %>% 
+      mutate(FacilityName = case_when(
+    FileName == "R10 - AMI" & is.na(FacilityName) ~ "ADVENTIST MEDICAL CENTER ILIGAN (HAVEN)",
+FileName == "RO3 - MON" & is.na(FacilityName) ~ "BALAI MONCA'LINGA - RHU 1 MONCADA",
+FileName == "RO3 - BTN" & is.na(FacilityName) ~ "BATAAN GENERAL HOSPITAL AND MEDICAL CENTER",
+FileName == "CARz - BRH" & is.na(FacilityName) ~ "BAUIO CITY REPRODUCTIVE HEALTH AND WELLNESS CENTER",
+FileName == "NCR - KBS" & is.na(FacilityName) ~ "KLINIKA BERNARDO",
+FileName == "R4A - KLP" & is.na(FacilityName) ~ "KLINIKA LIPA",
+FileName == "RO3 - MAR" & is.na(FacilityName) ~ "MARIA AURORA COMMUNITY HOSPITAL",
+FileName == "RO3 - MEY" & is.na(FacilityName) ~ "MEYCAUAYAN CITY PRIMARY HIV CARE CLINIC (HOME OF BAMBOO)",
+FileName == "RO6 - SPI" & is.na(FacilityName) ~ "MOTHER CANDIDE CENTER - ST. PAUL'S HOSPITAL OF ILOILO",
+FileName == "CAR - NDC" & is.na(FacilityName) ~ "NOTRE DAME DE CHARTRES HOSPITAL",
+FileName == "R11 - DRH" & is.na(FacilityName) ~ "RHWC-CHO DAVAO",
+FileName == "NCR - TDC" & is.na(FacilityName) ~ "TAGUIG DROP-IN CENTER",
+      TRUE ~ FacilityName)) %>%
+  mutate(FacilityName = ifelse(is.na(FacilityName),FileName,FacilityName))
+
+faci_name$FacilityName[duplicated(faci_name$FacilityName)]
+```
+
+Result should be "character(0)"
+
+#### After cleaning, you need to rerun [Step 1.4: Extract facility names from General Input Sheet]
+
+------------------------------------------------------------------------
+
+## Part 2: Submission Rate
+
+Let's check the completeness of submitted data.
+
+### Step 2.1: Compute for regional and national submission rates.
+
+#### -\> REVIEW: Check encoded list of facilities per region.
+
+```{r,echo=FALSE,message=FALSE}
+
+# Step 1: Compute submission rate -------------------------------------------------
+
+# Define the list of regions and their corresponding total facilities — UPDATE IF NECESSARY
+region_facilities <- tibble(
+  region = c("RO1", "RO2", "RO3", "R4A", "R4B", "RO5", "RO6", 
+             "NIR", "RO7", "RO8", "RO9", "R10", "R11", "R12", 
+             "CRG", "BARMM", "CAR", "NCR"),
+ total_facilities = c(6, 4, 34, 38, 5, 5, 18, 
+                      1, 18, 16, 12, 8, 4, 16, 
+                      5, 2, 7, 57))
+
+# Summarize unique hubs and add missing regions
+sub_rate <- faci_name %>%
+  group_by(region) %>%
+  summarise(unique_hubs = as.numeric(n_distinct(FileName)), .groups = 'drop') %>%
+
+  # Join with the region_facilities to get total_facilities
+  full_join(region_facilities, by = "region") %>%
+  
+  # Replace NAs in unique_hubs with 0 for regions not found
+  mutate(unique_hubs = replace_na(unique_hubs, 0)) %>%
+
+# Compute remaining hubs
+  mutate(no_report = total_facilities - unique_hubs) %>%
+  
+# Generate national submission rate
+  bind_rows(summarise(., 
+                      across(where(is.numeric), sum, na.rm = TRUE), 
+                      across(where(is.character), ~"NATIONAL"))) %>%
+  mutate(submission_rate = round((unique_hubs / total_facilities) * 100))
+
+
+# View submission rate
+#View(sub_rate)
+
+sub_rate %>% 
+  filter(region=="NATIONAL") %>% print()
+
+rm(region_facilities)
+```
+
+This will print national submission rate. You can check regional submission rate by opening "sub_rate" data on the right panel.
+
+------------------------------------------------------------------------
+
+## Part 3: PLHIV on ART per regimen
+
+### Step 3.1: Extract PLHIV on ART from General Input Sheet {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Let's generate an **onart** dataframe. This might take a while because of the volume of files to be processed.
+
+After running, it will print the non-numeric data captured in the cleaning.
+
+```{r}
+
+# Define a function to read the specific range and standardize column names
+
+read_inputs <- function(file) {
+
+df <- tryCatch(
+  {
+    read_excel(file, sheet = "General Input", range = "B12:S31", .name_repair = "minimal")   # Updated 04 Feb 2025
+  },
+  error = function(e) {
+    message(paste("Error reading file:", file, "- Sheet 'General Input' not found."))
+    return(NULL)  # Return NULL if there's an error
+  }
+)
+
+  if (is.null(df)) return(NULL)  # Return NULL if reading failed
+
+df <- read_excel(file, sheet = "General Input", range = "B12:S36", .name_repair = "unique_quiet") # Updated 10 Mar 2025 for 2025 template
+
+# Standardize column names to ensure they match
+  colnames(df) <- paste0("Column", 1:ncol(df))
+
+# Replace all `NA` with 0 for rows where columns 2 to 18 are all `NA`
+  df <- df %>% mutate(across(2:18, ~ replace(., is.na(.), 0)))      # Updated 10 Mar 2025 for 2024 template - Include until col 18 to capture Dec 2024 data
+
+# Add a new column for the file name
+  df <- df %>% mutate(FileName = basename(file))  # Add file name without the path
+
+# Rename column
+  colnames(df) <- c("product", "month", "month", "month10_2024","month11_2024","month12_2024","month01", "month02",
+                    "month03", "month04", "month05", "month06",
+                    "month07", "month08", "month09", "month10",
+                    "month11", "month12", "FileName")  # Ensure to keep the FileName column
+
+
+return(df)
+}
+
+
+
+# Use map to apply the function to each file and store the results in a list
+inputs_data_list <- map(excel_files, read_inputs)
+
+# Combine the data frames into a single data frame
+onart <- do.call(rbind, inputs_data_list)
+
+# Check files with errors
+warnings()
+
+
+# STEP 4: Cleaning data frame -----------------------------------------------------
+# Update 11 Mar 2025 - added script to clean non-numeric 
+# STEP 4A: Transform all inventory column from chr to numeric -----------------------------------
+onart <- onart %>% select(-month)
+
+# Define the month columns
+month_cols <- paste0("month", sprintf("%02d", 1:12))  # Create a vector of month column names
+month_cols <- c(month_cols, paste0("month",10:12,"_2024"))
+
+# Clean and tag rows with non-numeric characters
+for (col in month_cols) {
+  cleaned_col <- paste0(col, "_cleaned")  # Create a new name for the cleaned column
+  non_numeric_col <- paste0(col, "_non_numeric")  # Create a new name for the non-numeric character column
+  
+  # Add new columns: one for cleaned strings and one for non-numeric characters
+  onart <- onart %>%
+    mutate(
+      !!cleaned_col := suppressWarnings(as.numeric(str_replace(!!sym(col), "\\..*", ""))),
+      !!non_numeric_col := str_extract(!!sym(col), "[^0-9]+")  # Extract and store non-numeric characters
+    )
+}
+
+# Create a tag column to indicate rows with non-numeric characters in any month columns
+onart <- onart %>%
+  mutate(
+    has_string = rowSums(select(., ends_with("_non_numeric")) %>%
+                           mutate(across(everything(), ~ !is.na(.)))) > 0) # Check if any month column has non-numeric
+
+# Identify all columns with `_non_numeric` suffix
+non_numeric_cols <- grep("_non_numeric$", colnames(onart), value = TRUE)
+
+# Combine the content of `_non_numeric` columns into a single column called `combined_non_numeric`
+onart <- onart %>%
+  unite("combined_non_numeric", all_of(non_numeric_cols), na.rm = TRUE, remove = TRUE, sep = "; ")
+
+rm(inputs_data_list)
+
+# Print the string captured
+unique(onart$combined_non_numeric)
+
+
+```
+
+#### -\> REVIEW these rows by opening the dataframe **onart**
+
+Sort the last column "has_string" to see which rows has "TRUE" (rows which contains string). If you're okay to drop these values, you can proceed to the next step.
+
+### Step 3.2: Clean the data frame by keeping only numeric data {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+This might take a while, be patient! :)
+
+```{r}
+
+# STEP 4B: Keep numeric columns only -----------------------------------------------
+
+# Define the month columns and their cleaned counterparts
+month_cols <- paste0("month", sprintf("%02d", 1:12))         # Original month columns: "month01", "month02", ..., "month12"
+month_cols <- c(month_cols, paste0("month",10:12,"_2024"))
+cleaned_cols <- paste0(month_cols, "_cleaned")               # Cleaned month columns: "month01_cleaned", ..., "month12_cleaned"
+
+# Step 1: Drop the original `month01` to `month12` columns
+onart <- onart %>%
+  select(-all_of(month_cols)) %>%  # Remove the original month columns
+  
+  # Step 2: Rename `month01_cleaned` to `month01`, ..., `month12_cleaned` to `month12`
+  rename_with(~ gsub("_cleaned", "", .x), all_of(cleaned_cols)) %>% # Remove "_cleaned" suffix from each cleaned column
+  
+  # Step 3: Move "FileName" column to the end
+  select(-FileName, -combined_non_numeric, everything(), combined_non_numeric, FileName) # Remove `FileName` and then re-add it at the end
+
+# Split `FileName` into `region` and `hub` based on " - "
+onart <- onart %>%
+  mutate(
+    filename = FileName,  # Retain the original FileName for processing
+    region = substr(FileName, 1, 3),  # Extract the first 3 characters for 'region'
+    hub = str_trim(substr(FileName, 5, nchar(FileName)))) %>%  # Extract from 5th character onward and trim spaces
+  
+  # Remove the leading " - " in hub and clean up the extension
+  mutate(
+    hub = str_replace(hub, "- ", ""),  # Remove leading "- " from hub
+    hub = str_replace(hub, "– ", ""),  # Remove leading "– " from hub
+    hub = str_replace(hub, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from hub
+    FileName = str_replace(FileName, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from FileName
+    region = str_replace_all(region, "R0", "RO")) # Replace all '0' with 'O' in the 'region' column
+
+# clean column names and replace NA with 0
+onart <- onart %>%
+        select(product, month10_2024, month11_2024, month12_2024, everything()) %>%
+         rename(Oct24 = month10_2024, Nov24 = month11_2024, Dec24 = month12_2024,
+           Jan = month01, Feb = month02, Mar = month03,
+                Apr = month04, May = month05, Jun = month06,
+                Jul = month07, Aug = month08, Sep = month09,
+                Oct = month10, Nov = month11, Dec = month12) %>%
+         mutate(across(2:16, ~ replace(., is.na(.), 0)))
+
+# Split `FileName` into `region` and `hub` based on " - "
+onart <- onart %>%
+  mutate(
+    filename = FileName,  # Retain the original FileName for processing
+    region = substr(FileName, 1, 3),  # Extract the first 3 characters for 'region'
+    hub = str_trim(substr(FileName, 5, nchar(FileName)))) %>%  # Extract from 5th character onward and trim spaces
+
+  # Remove the leading " - " in hub and clean up the extension
+  mutate(
+    hub = str_replace(hub, "- ", ""),  # Remove leading " - " from hub
+    hub = str_replace(hub, "– ", ""),  # Remove leading "– " from hub
+    hub = str_replace(hub, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from hub
+    FileName = str_replace(FileName, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from FileName
+    region = str_replace_all(region, "R0", "RO"))  # Replace all '0' with 'O' in the 'region' column
+
+
+  # get full name of treatment facility
+    onart <- onart %>% merge(faci_name %>% select(FileName, FacilityName), by = "FileName", all = TRUE) %>%
+
+
+  # order columns
+      select(region, FacilityName, hub, product, FileName, everything()) %>%
+      select(-ends_with("2023"), -filename) %>%
+      filter(!str_detect(product, "Formulation Drugs")) %>%
+      filter(product != "F. Other Commodities") %>%
+      filter(!product %in% c("0", "0.0", "4", "23", "23.0", "4.0")) %>%
+      group_by(region, FacilityName, hub, product) %>%
+      summarise(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop")
+
+
+    # Create a summary per region
+onart_region <- onart %>%
+    mutate(
+      product = str_replace_all(product, "[\r\n]", " "),  # Remove newline characters
+      product = str_replace_all(product, "\\s+", " "),  # Replace multiple spaces with a single space
+      product = trimws(product),  # Remove leading/trailing spaces
+      product = str_squish(product)  # Remove extra spaces within the string
+    ) %>%
+    group_by(region, product) %>%
+    summarise(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop")
+
+onart_region <- onart_region %>%
+# Generate national onart
+    group_by(region,product) %>%
+    summarise(across(where(is.numeric), sum, na.rm=TRUE), .groups = "drop") %>%
+    bind_rows(
+      onart_region %>% group_by(product) %>%
+        summarise(across(where(is.numeric), sum, na.rm=TRUE), .groups = "drop") %>%
+        mutate(region = "NATIONAL")
+    ) 
+    
+onart_region %>%
+    filter(region=="NATIONAL") %>% 
+    mutate(product=
+             ifelse(product=="Lamivudine 300mg + Tenofovir 300mg + Dolutegravir 50mg","TLD",ifelse(product=="Lamivudine 300mg + Tenofovir 300mg + Efavirenz 600mg","LTE",
+                                                                                                   product))) %>%
+  filter(product=="TLD" | product=="LTE") %>% 
+  select(-which(colSums(onart_region == 0) == nrow(onart_region))) %>%
+  select(1:2,  reporting_month) %>%
+  print()
+
+onart_natl <- onart_region %>%
+    filter(region=="NATIONAL")
+```
+
+At this point, you have **onart** (site-level) and **onart_region**. This is based on the General Input Sheet, per product and across months. You should get all numeric columns at this point except for region, FacilityName, hub, and product.
+
+The output above lets you can the number of onart on TLD and LTE. You can countercheck using OHASIS dashboard for a comparison on the PLHIV per product/regimen, and review MIR with unsound reports.
+
+### Step 3.3: Clean the onart data (drop unnecessary rows) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+```{r}
+onart <- onart %>% 
+  select(region, FacilityName, hub, product, reporting_month) %>%
+  filter(get(reporting_month) > 0) %>%
+  mutate(
+    product = case_when(
+      str_detect(product, "HIV RDT 1") ~ "HIV RDT 1 (Screening Test)",
+      str_detect(product, "Pre-Exposure") ~ "Pre-exposure Prophylaxis",
+      str_detect(product, "Post-Exposure") ~ "Post-exposure Prophylaxis",
+      product == "Ceftriaxone 1g" ~ "Ceftriaxone 250mg",
+      product == "HIV Test kits" ~ "HIV RDT 1 (Screening Test)",
+      product == "HIV/SY (HIV/Syphilis) Duo test" ~ "HIV/SY (HIV/Syphilis) Duo",
+      product == "Lamivudine 300mg + Tenofovir 300mg +Dolutegravir 50mg" ~ "Lamivudine 300mg + Tenofovir 300mg + Dolutegravir 50mg",
+      product == "Penicillin G Benzathine 1.2M units" ~ "Penicillin G Benzathine 1.2 M units",
+      TRUE ~ product)) %>%
+  rename(on_art = last_col())
+
+onart %>% distinct(product) %>% arrange(product) 
+```
+
+Review the output product for any duplicates.
+
+------------------------------------------------------------------------
+
+🥳 We're midway! 🥳
+
+------------------------------------------------------------------------
+
+## Part 4: Dispensing data
+
+### Step 4.1: Extract data from General Input Sheet {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Similar with the onart process, let's generate a **disp** dataframe. This might take a while because of the volume of files to be processed.
+
+After running, it will print the non-numeric data captured in the cleaning.
+
+```{r,message=FALSE,echo=FALSE,results='hide'}
+
+
+# Define the month columns and their cleaned counterparts
+month_cols <- paste0("month", sprintf("%02d", 1:12))         # Original month columns: "month01", "month02", ..., "month12"
+month_cols <- c(month_cols, paste0("month",11:12,"_2024"))
+cleaned_cols <- paste0(month_cols, "_cleaned")               # Cleaned month columns: "month01_cleaned", ..., "month12_cleaned"
+
+  # Define a function to read the specific range and standardize column names
+    read_dispensed_range <- function(file) {
+
+      #print(basename(file))           # Added 04 Feb 2025 - Check which file is being processed or has error
+      #print(excel_sheets(file))       # Added 04 Feb 2025 - Check which sheet is being processed or has error
+
+      df <- tryCatch(
+        {
+          read_excel(file, sheet = "Dispensed", range = "C6:R59", na=c("","N/A"), .name_repair = "unique_quiet") # Updated 04 Feb 2025 - To accommodate additional rows inserted by facilities + replace "N/A" as na
+        },
+        error = function(e) {
+          message(paste("Error reading file:", file, "- Sheet 'Dispensed' not found."))
+          return(NULL)  # Return NULL if there's an error
+        }
+      )
+
+      if (is.null(df)) return(NULL)  # Return NULL if reading failed
+
+      df <- read_excel(file, sheet = "Dispensed", range = "C6:R59", .name_repair = "minimal") # Updated 04 Feb 2025
+
+      # Standardize column names to ensure they match
+        colnames(df) <- paste0("Column", 1:ncol(df))
+
+      # Replace all `NA` with 0 for rows where columns 2 to 16 are all `NA`   # Updated 04 Feb 2025 - Include until col 16
+        df <- df %>% mutate(across(4:16, ~ replace(., is.na(.), 0)))          # Updated 04 Feb 2025 - Include until col 16
+
+      # Add a new column for the file name
+        df <- df %>% mutate(FileName = basename(file))  # Add file name without the path
+
+      # Rename columns
+        colnames(df) <- c("product", "unit","month11_2024","month12_2024","month01", "month02",
+                          "month03", "month04", "month05", "month06",
+                          "month07", "month08", "month09", "month10",
+                          "month11", "month12", "FileName")  # Ensure to keep the FileName column
+
+      # Split the unit column after the first space and convert the first part to numeric
+        df <- df %>%
+          separate(unit, into = c("numeric_unit", "unit_description"), sep = " ", extra = "merge", fill = "right") %>%
+          mutate(numeric_unit = suppressWarnings(as.numeric(numeric_unit)),  # Convert first part to numeric
+          unit_description = suppressWarnings(ifelse(is.na(unit_description), "", unit_description)))  # Handle NA values for unit_description
+
+        return(df)
+        }
+
+  # Use map to apply the function to each file and store the results in a list
+    dispensed_data_list <- map(excel_files, read_dispensed_range)
+
+  # Combine the data frames into a single data frame
+    disp <- do.call(rbind, dispensed_data_list)
+
+  # Check files with errors
+    warnings()
+    
+    rm(dispensed_data_list)
+    
+
+# STEP 4: Transform all inventory column from chr to numeric -----------------------------------
+
+
+  # Clean and tag rows with non-numeric characters
+    for (col in month_cols) {
+      cleaned_col <- paste0(col, "_cleaned")  # Create a new name for the cleaned column
+      non_numeric_col <- paste0(col, "_non_numeric")  # Create a new name for the non-numeric character column
+
+      # Add new columns: one for cleaned strings and one for non-numeric characters
+      disp <- disp %>%
+        mutate(
+          !!cleaned_col := suppressWarnings(as.numeric(str_replace(!!sym(col), "\\..*", ""))),
+          !!non_numeric_col := suppressWarnings(str_extract(!!sym(col), "[^0-9]+")  # Extract and store non-numeric characters
+        ))
+    }
+
+  # Create a tag column to indicate rows with non-numeric characters in any month columns
+    disp <- disp %>%
+      mutate(
+        has_string = rowSums(select(., ends_with("_non_numeric")) %>%
+                                    mutate(across(everything(), ~ !is.na(.)))) > 0) # Check if any month column has non-numeric
+
+  # Identify all columns with `_non_numeric` suffix
+    non_numeric_cols <- grep("_non_numeric$", colnames(disp), value = TRUE)
+
+  # Combine the content of `_non_numeric` columns into a single column called `combined_non_numeric`
+    disp <- disp %>%
+      unite("combined_non_numeric", all_of(non_numeric_cols), na.rm = TRUE, remove = TRUE, sep = "; ")
+
+  # Print the string captured
+    unique(disp$combined_non_numeric)
+
+
+```
+
+#### -\> REVIEW these rows by opening the dataframe ***disp***
+
+Sort the last column "has_string" to see which rows has "TRUE" (rows which contains string).
+
+Once you're okay to drop these string values, you can proceed to the next step. Otherwise, edit them directly in the excel sheet and re-run [Step 4.1: Extract data from General Input Sheet]
+
+### Step 4.2: Clean the data frame by keeping only numeric data {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+```{r,message=FALSE,echo=FALSE}
+
+# STEP 5: Keep numeric columns only -----------------------------------------------
+
+  
+  # Step 1: Drop the original `month01` to `month12` columns
+    disp <- disp %>%
+      select(-all_of(month_cols)) %>%  # Remove the original month columns
+
+  # Step 2: Rename `month01_cleaned` to `month01`, ..., `month12_cleaned` to `month12`
+    rename_with(~ gsub("_cleaned", "", .x), all_of(cleaned_cols)) %>% # Remove "_cleaned" suffix from each cleaned column
+
+  # Step 3: Move "FileName" column to the end
+    select(-FileName, -combined_non_numeric, everything(), combined_non_numeric, FileName) # Remove `FileName` and then re-add it at the end
+
+  # Split `FileName` into `region` and `hub` based on " - "
+    disp <- disp %>%
+      mutate(
+        filename = FileName,  # Retain the original FileName for processing
+        region = substr(FileName, 1, 3),  # Extract the first 3 characters for 'region'
+        hub = str_trim(substr(FileName, 5, nchar(FileName)))) %>%  # Extract from 5th character onward and trim spaces
+
+      # Remove the leading " - " in hub and clean up the extension
+      mutate(
+        hub = str_replace(hub, "- ", ""),  # Remove leading "- " from hub
+        hub = str_replace(hub, "– ", ""),  # Remove leading "– " from hub
+        hub = str_replace(hub, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from hub
+        FileName = str_replace(FileName, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from FileName
+        region = str_replace_all(region, "R0", "RO")) # Replace all '0' with 'O' in the 'region' column
+    
+    
+
+# STEP 6: Data set cleaning -------------------------------------------------------
+
+  disp <- disp %>%
+      # replace NA with 0
+        mutate(across(everything(), ~replace(., is.na(.), 0))) %>%
+
+      # rename columns
+        rename(Nov24 = month11_2024, Dec24 = month12_2024,
+              Jan = month01, Feb = month02, Mar = month03,
+               Apr = month04, May = month05, Jun = month06,
+               Jul = month07, Aug = month08, Sep = month09,
+               Oct = month10, Nov = month11, Dec = month12) %>%
+
+      # drop unnecessary columns
+        select(-has_string) %>%
+        filter(product!= "0",
+               !str_detect(product, "Formulation Drugs"),
+               !str_detect(product, "Drugs"),
+               !str_detect(product, "Laboratory Supplies"),
+               !str_detect(product, "Other")
+               )
+
+      # get full name of treatment facility
+        disp <- disp %>% merge(faci_name %>% select(FileName, FacilityName), by = "FileName", all = TRUE) %>%
+
+      # order columns
+        select(region, FacilityName, hub, everything(), -FileName, FileName) %>%
+        select(-combined_non_numeric, -filename) %>%
+          relocate(c(Nov24,Dec24), .before = Jan)
+                    
+                    
+    print("End of step 4.2. Generated disp dataframe.")
+```
+
+We now have a **disp** dataset from the dispensed sheet!
+
+Similar to onart dataset, this contains the monthly dispensing pattern from Nov24, Dec24 and Jan-Dec.
+
+### Step 4.3: Clean Product x Numeric Unit {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Let's make sure that product and numeric units are correct. After running this code, it will generate a table of the product and numeric unit.
+
+```{r}
+      # manual cleaning of numeric_unit
+
+
+disp <- disp %>%
+  mutate(
+    product = case_when(
+      str_detect(product, "HIV RDT 1") ~ "HIV RDT 1 (Screening Test)",
+      str_detect(product, "Pre-exposure Prophylaxis") ~ "Pre-exposure Prophylaxis",
+      product == "Ceftriaxone 1g" ~ "Ceftriaxone 250mg",
+      product == "HIV Test kits" ~ "HIV RDT 1 (Screening Test)",
+      product == "HIV/SY (HIV/Syphilis) Duo test" ~ "HIV/SY (HIV/Syphilis) Duo",
+      product == "Lamivudine 300mg + Tenofovir 300mg +Dolutegravir 50mg" ~ "Lamivudine 300mg + Tenofovir 300mg + Dolutegravir 50mg",
+      product == "Penicillin G Benzathine 1.2M units" ~ "Penicillin G Benzathine 1.2 M units",
+      TRUE ~ product
+    )
+  ) %>%
+  mutate(
+    numeric_unit = case_when(
+      product == "Abacavir 300mg" ~ 60,
+      product == "Dolutegravir 50mg" ~ 30,
+      product == "Efavirenz 600mg" ~ 30,
+      product == "Efavirenz 200mg" ~ 90,
+      product == "Lamivudine 150mg" ~ 60,
+      product == "Nevirapine 200mg" ~ 60,
+      product == "Dolutegravir 10mg" ~ 90,
+      product == "Zidovudine 300mg" ~ 60,
+      product == "Lamivudine 10mg/mL" ~ 1,
+      product == "Nevirapine 10mg/mL" ~ 1,
+      product == "Zidovudine 10mg/mL" ~ 1,
+      product == "Lamivudine 300mg + Tenofovir 300mg" ~ 30,
+      product == "Lamivudine 300mg + Tenofovir 300mg + Dolutegravir 50mg" ~ 30,
+      product == "Lamivudine 300mg + Tenofovir 300mg + Efavirenz 600mg" ~ 30,
+      product == "Lamivudine 150mg + Zidovudine 300mg" ~ 60,
+      product == "Lopinavir 200mg + Ritonavir 50mg" ~ 120,
+      product == "Abacavir 120mg + Lamivudine 60mg + Dolutegravir 5mg" ~ 90,
+      product == "Abacavir 120mg + Lamivudine 60mg" ~ 30,
+      product == "Lamivudine 30mg + Zidovudine 60mg" ~ 60,
+      product == "Azithromycin 500mg" ~ 1,
+      product == "Fluconazole 200mg" ~ 1,
+      product == "Isoniazid 300mg" ~ 1,
+      product == "Isoniazid 300mg + Rifapentine 300mg" ~ 1,
+      product == "Primaquine 15mg" ~ 1,
+      product == "Valganciclovir 450mg" ~ 1,
+      product == "Cefixime 400mg" ~ 1,
+      product == "Ceftriaxone 250mg" ~ 1,
+      product == "Penicillin G Benzathine 1.2 M units" ~ 1,
+      product == "Tenofovir 300mg" ~ 30,
+      product == "Daclatasvir 60mg" ~ 28,
+      product == "Sofosbuvir 400mg" ~ 28,
+      product == "Sofosbuvir 400mg + Ledipasvir 90mg" ~ 28,
+      product == "HIV RDT 1 (Screening Test)" ~ 1,
+      product == "HIV RDT 2 (Confirmation)" ~ 1,
+      product == "HIV RDT 3 (Re-confirmation)" ~ 1,
+      product == "Syphilis Rapid Test" ~ 1,
+      product == "HIV/SY (HIV/Syphilis) Duo test" ~ 1,
+      product == "HIV Self Test" ~ 1,
+      product == "Hepatitis B Rapid Diagnostic Test" ~ 1,
+      product == "Hepatitis C Rapid Diagnostic Test" ~ 1,
+      product == "CD4 reagents compatible with PIMA machine" ~ 1,
+      product == "CD4 reagents compatible with BD FACS Presto machine" ~ 1,
+      product == "HIV VIRAL LOAD Point of Care Cartridge" ~ 1,
+      product == "Pre-exposure Prophylaxis" ~ 30,
+      product == "Condom" ~ 1,
+      product == "Water based lubricant" ~ 1,
+      
+      #Add aditional rows here for correction
+      
+      
+      
+      
+      TRUE ~ numeric_unit # Keep existing values for other cases
+    )
+  )
+
+disp %>% distinct(product, numeric_unit) %>% arrange(product) 
+```
+
+#### -\> REVIEW the numeric unit vs product. We will use this to compute for the computation of *package* unit
+
+You can add rows to correct the numeric_unit before the line "TRUE \~ numeric_unit". Just copy the notation provided. Rerun [Step 4.3: Clean Product x Numeric Unit] once you've added your changes.
+
+### \<SPECIAL FOR JANUARY\> Step 4.4: Computing for the average monthly consumption (site-level) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Now we'll compute for the average monthly consumption (AMC) in the past 3 and 6 months. AMC-6 will only be available starting April reporting period.
+
+```{r}
+month_order <- c("Nov24","Dec24","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+disp <- disp %>%
+  mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
+  mutate(
+    sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
+    count = rowSums(!is.na(select(., all_of(p3m)))),
+    amc_3_basic = ifelse(is.nan(round(sum/count)),0,round(sum/count, 1)),
+    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)),0,round(amc_3_basic / numeric_unit, 1)),
+    amc_6_basic = NA,
+    amc_6_package = NA
+  ) %>%
+  select(-sum, -count)
+```
+
+At this point, we've added columns on *disp* dataframe for amc_3 and amc_6 for basic and package.
+
+### Step 4.5: Computing for the average monthly consumption (regional/national) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+```{r}
+
+# STEP 8: Generate national and regional summary -----------------------------------------------
+
+# Regional
+disp_reg <- disp %>%
+  group_by(region, numeric_unit, product) %>%
+  summarise(across(all_of(month_order), sum, na.rm = TRUE), .groups = "drop") %>% # Ensure proper grouping
+  mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
+  mutate(
+    sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
+    count = rowSums(!is.na(select(., all_of(p3m)))),
+    amc_3_basic = ifelse(is.nan(round(sum/count)),0,round(sum/count, 1)),
+    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)),0,round(amc_3_basic / numeric_unit, 1)),
+    amc_6_basic = NA,
+    amc_6_package = NA
+  ) %>%
+  select(-sum, -count)
+
+
+# National
+disp_natl <- disp %>%
+  group_by(numeric_unit, product) %>%
+  summarise(across(all_of(month_order), sum, na.rm = TRUE), .groups = "drop") %>%
+  mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
+  mutate(
+    sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
+    count = rowSums(!is.na(select(., all_of(p3m)))),
+    amc_3_basic = ifelse(is.nan(round(sum/count)),0,round(sum/count, 1)),
+    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)),0,round(amc_3_basic / numeric_unit, 1)),
+    amc_6_basic = NA,
+    amc_6_package = NA
+  ) %>%
+  select(-sum, -count)
+
+print("Done generating regional and national dispensing dataframe.")
+```
+
+We now have three disp data frames:
+
+1.  disp - site-level
+
+2.  disp_natl - national
+
+3.  disp_reg - regional
+
+------------------------------------------------------------------------
+
+## Part 5: Inventory Data
+
+### Step 5.1: Extract data from Inventory Sheet {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Now we'll consolidate the inventory sheet into one. This might take a while (again) so please be patient!
+
+```{r,echo=FALSE,results='hide',message=FALSE}
+  # Define a function to read the specific range and standardize column names
+    read_inventory_range <- function(file) {
+      df <- tryCatch(
+        {
+          read_excel(file, sheet = "Inventory", range = "C6:R243") # Updated 04 Feb 2025
+        },
+        error = function(e) {
+          message(paste("Error reading file:", file, "- Sheet 'Inventory' not found."))
+          return(NULL)
+        }
+      )
+      if (is.null(df)) return(NULL)
+
+      df <- read_excel(file, sheet = "Inventory", range = "C6:Q243", col_types="text", .name_repair = "unique_quiet")  # Updated 04 Feb 2025 - Reads values as text format for standardization
+
+      # Fill down the first column to handle merged cells
+      df <- df %>% fill(1, .direction = "down")
+      df <- df %>% fill(2, .direction = "down")
+
+      # Standardize column names
+        colnames(df) <- paste0("Column", 1:ncol(df))
+
+      # Replace all `NA` with 0 for rows where columns 2 to 15 are all `NA`
+        df <- df %>% mutate(across(4:15, ~ replace(., is.na(.), 0)))
+
+      # Add a new column for the file name
+       df <- df %>% mutate(FileName = basename(file))
+
+      # Rename columns
+        colnames(df) <- c("product", "unit", "expiry", "month01", "month02",
+                          "month03", "month04", "month05", "month06",
+                          "month07", "month08", "month09", "month10",
+                          "month11", "month12", "FileName")
+
+      # Split the unit column
+        df <- df %>%
+          separate(unit, into = c("numeric_unit", "unit_description"), sep = " ", extra = "merge", fill = "right") %>%
+          mutate(numeric_unit = as.numeric(numeric_unit))
+
+        return(df)
+      }
+
+  # Use map to apply the function to each file and store the results in a list
+    inventory_data_list <- map(excel_files, read_inventory_range)
+
+  # Combine the data frames into a single data frame
+    inventory <- do.call(rbind, inventory_data_list)
+
+  # check files with error in dates for cleaning
+    #warnings()
+
+
+# STEP 4: Transform all inventory column from chr to numeric -----------------------------------
+
+  # Define the month columns
+    month_cols_12 <- paste0("month", sprintf("%02d", 1:12))  # Create a vector of month column names
+
+  # Clean and tag rows with non-numeric characters
+    for (col in month_cols_12) {
+      cleaned_col <- paste0(col, "_cleaned")          # Create a new name for the cleaned column
+      non_numeric_col <- paste0(col, "_non_numeric")  # Create a new name for the non-numeric character column
+
+  # Add new columns: one for cleaned strings and one for non-numeric characters
+    inventory <- inventory %>%
+      mutate(
+        !!cleaned_col := suppressWarnings(as.numeric(str_replace(!!sym(col), "\\..*", ""))),
+        !!non_numeric_col := str_extract(!!sym(col), "[^0-9]+")  # Extract and store non-numeric characters
+      )
+
+     }
+
+  # Create a tag column to indicate rows with non-numeric characters in any month columns
+    inventory <- inventory %>%
+      mutate(
+        has_string = rowSums(select(., ends_with("_non_numeric")) %>%
+                                    mutate(across(everything(), ~ !is.na(.)))) > 0  # Check if any month column has non-numeric
+      )
+
+  # Identify all columns with `_non_numeric` suffix
+    non_numeric_cols <- grep("_non_numeric$", colnames(inventory), value = TRUE)
+
+  # Combine the content of `_non_numeric` columns into a single column called `combined_non_numeric`
+    inventory <- inventory %>%
+      unite("combined_non_numeric", all_of(non_numeric_cols), na.rm = TRUE, remove = TRUE, sep = "; ")
+
+    rm(inventory_data_list)
+    
+  # Print the string captured
+    unique(inventory$combined_non_numeric)
+
+```
+
+#### -\> REVIEW these rows by opening the dataframe ***inventory***
+
+Sort the last column "has_string" to see which rows has "TRUE" (rows which contains string). If you're okay to drop these string values, you can proceed to the next step. Otherwise, manually edit in the excel file and re-run [Step 5.1: Extract data from Inventory Sheet].
+
+### Step 5.2: Clean the data frame by keeping only numeric data {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+```{r}
+
+# STEP 5: Keep numeric columns only -----------------------------------------------
+
+    cleaned_cols_12 <- paste0(month_cols_12, "_cleaned")               # Cleaned month columns: "month01_cleaned", ..., "month12_cleaned"
+
+  # Step 1: Drop the original `month01` to `month12` columns
+    inventory <- inventory %>%
+      select(-all_of(month_cols_12))  # Remove the original month columns
+
+  # Step 2: Rename `month01_cleaned` to `month01`, ..., `month12_cleaned` to `month12`
+  inventory <- inventory %>%
+    rename_with(~ gsub("_cleaned", "", .x), all_of(cleaned_cols_12)) %>%  # Remove "_cleaned" suffix from each cleaned column
+
+  # Step 3: Move "FileName" column to the end
+    select(-FileName, -combined_non_numeric, everything(), combined_non_numeric, FileName) # Remove `FileName` and then re-add it at the end
+
+  # Split `FileName` into `region` and `hub` based on " - "
+    inventory <- inventory %>%
+      mutate(
+        filename = FileName,  # Retain the original FileName for processing
+        region = substr(FileName, 1, 3),  # Extract the first 3 characters for 'region'
+        hub = str_trim(substr(FileName, 5, nchar(FileName)))) %>%  # Extract from 5th character onward and trim spaces
+
+      # Remove the leading " - " in hub and clean up the extension
+      mutate(
+        hub = str_replace(hub, "- ", ""),  # Remove leading "- " from hub
+        hub = str_replace(hub, "– ", ""),  # Remove leading "– " from hub
+        hub = str_replace(hub, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from hub
+        FileName = str_replace(FileName, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from FileName
+        region = str_replace_all(region, "R0", "RO")) # Replace all '0' with 'O' in the 'region' column
+
+# STEP 6: Data set cleaning with expiry date --------------------
+
+  inventory <- inventory %>%
+
+    # replace NA with 0
+      mutate(across(everything(), ~replace(., is.na(.), 0))) %>%
+
+    # rename columns
+      rename(Jan = month01, Feb = month02, Mar = month03,
+             Apr = month04, May = month05, Jun = month06,
+             Jul = month07, Aug = month08, Sep = month09,
+             Oct = month10, Nov = month11, Dec = month12) %>%
+
+    # drop unnecessary columns
+      select(-has_string) %>%
+      filter(product!= "0",
+             !str_detect(product, "Formulation Drugs"),
+             !str_detect(product, "Drugs"),
+             !str_detect(product, "Laboratory Supplies"),
+             !str_detect(product, "Other")
+             )
+
+    # get full name of treatment facility
+      inventory <- inventory %>% merge(faci_name %>% select(FileName, FacilityName), by = "FileName", all = TRUE) %>%
+
+    # order columns
+      select(region, FacilityName, hub, FileName, everything()) %>%
+      select(-combined_non_numeric)
+      
+print("End of step 5.2")
+```
+
+We now have a **inventory** dataset from the Inventory sheet!
+
+Similar to onart dataset, this contains the monthly inventory from Jan-Dec and the **expiry date**.
+
+### Step 5.3: Clean Product x Numeric Unit {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Let's make sure that product and numeric units are correct. After running this code, it will generate a table of the product and numeric unit.
+
+```{r}
+      # manual cleaning of numeric_unit
+
+
+inventory <- inventory %>%
+  mutate(
+    product = case_when(
+      str_detect(product, "HIV RDT 1") ~ "HIV RDT 1 (Screening Test)",
+      str_detect(product, "Pre-exposure Prophylaxis") ~ "Pre-exposure Prophylaxis",
+      product == "Ceftriaxone 1g" ~ "Ceftriaxone 250mg",
+      product == "HIV Test kits" ~ "HIV RDT 1 (Screening Test)",
+      product == "HIV/SY (HIV/Syphilis) Duo test" ~ "HIV/SY (HIV/Syphilis) Duo",
+      product == "Lamivudine 300mg + Tenofovir 300mg +Dolutegravir 50mg" ~ "Lamivudine 300mg + Tenofovir 300mg + Dolutegravir 50mg",
+      product == "Penicillin G Benzathine 1.2M units" ~ "Penicillin G Benzathine 1.2 M units",
+      TRUE ~ product
+    )
+  ) %>%
+  mutate(
+    numeric_unit = case_when(
+      product == "Abacavir 300mg" ~ 60,
+      product == "Dolutegravir 50mg" ~ 30,
+      product == "Efavirenz 600mg" ~ 30,
+      product == "Efavirenz 200mg" ~ 90,
+      product == "Lamivudine 150mg" ~ 60,
+      product == "Nevirapine 200mg" ~ 60,
+      product == "Dolutegravir 10mg" ~ 90,
+      product == "Zidovudine 300mg" ~ 60,
+      product == "Lamivudine 10mg/mL" ~ 1,
+      product == "Nevirapine 10mg/mL" ~ 1,
+      product == "Zidovudine 10mg/mL" ~ 1,
+      product == "Lamivudine 300mg + Tenofovir 300mg" ~ 30,
+      product == "Lamivudine 300mg + Tenofovir 300mg + Dolutegravir 50mg" ~ 30,
+      product == "Lamivudine 300mg + Tenofovir 300mg + Efavirenz 600mg" ~ 30,
+      product == "Lamivudine 150mg + Zidovudine 300mg" ~ 60,
+      product == "Lopinavir 200mg + Ritonavir 50mg" ~ 120,
+      product == "Abacavir 120mg + Lamivudine 60mg + Dolutegravir 5mg" ~ 90,
+      product == "Abacavir 120mg + Lamivudine 60mg" ~ 30,
+      product == "Lamivudine 30mg + Zidovudine 60mg" ~ 60,
+      product == "Azithromycin 500mg" ~ 1,
+      product == "Fluconazole 200mg" ~ 1,
+      product == "Isoniazid 300mg" ~ 1,
+      product == "Isoniazid 300mg + Rifapentine 300mg" ~ 1,
+      product == "Primaquine 15mg" ~ 1,
+      product == "Valganciclovir 450mg" ~ 1,
+      product == "Cefixime 400mg" ~ 1,
+      product == "Ceftriaxone 250mg" ~ 1,
+      product == "Penicillin G Benzathine 1.2 M units" ~ 1,
+      product == "Tenofovir 300mg" ~ 30,
+      product == "Daclatasvir 60mg" ~ 28,
+      product == "Sofosbuvir 400mg" ~ 28,
+      product == "Sofosbuvir 400mg + Ledipasvir 90mg" ~ 28,
+      product == "HIV RDT 1 (Screening Test)" ~ 1,
+      product == "HIV RDT 2 (Confirmation)" ~ 1,
+      product == "HIV RDT 3 (Re-confirmation)" ~ 1,
+      product == "Syphilis Rapid Test" ~ 1,
+      product == "HIV/SY (HIV/Syphilis) Duo test" ~ 1,
+      product == "HIV Self Test" ~ 1,
+      product == "Hepatitis B Rapid Diagnostic Test" ~ 1,
+      product == "Hepatitis C Rapid Diagnostic Test" ~ 1,
+      product == "CD4 reagents compatible with PIMA machine" ~ 1,
+      product == "CD4 reagents compatible with BD FACS Presto machine" ~ 1,
+      product == "HIV VIRAL LOAD Point of Care Cartridge" ~ 1,
+      product == "Pre-exposure Prophylaxis" ~ 30,
+      product == "Condom" ~ 1,
+      product == "Water based lubricant" ~ 1,
+      
+      #Add aditional rows here for correction
+      
+      
+      
+      
+      TRUE ~ numeric_unit # Keep existing values for other cases
+    )
+  )
+
+inventory %>% distinct(product, numeric_unit) %>% arrange(product) 
+```
+
+#### -\> REVIEW the numeric unit vs product. We will use this to compute for the computation of *package* unit.
+
+Make sure that you reflect here your edits in [Step 4.3: Clean Product x Numeric Unit]
+
+### Step 5.4: Processing reported expiry date
+
+```{r}
+# Define expiry cutoff dynamically based on the reporting month
+expiry_cutoff <- floor_date(as.Date(paste0(2025, "-", reporting_month, "-01"), format = "%Y-%b-%d") + months(1))
+
+# Process expiry and determine if it’s before last month
+inventory <- inventory %>%
+  mutate(
+    expiry_num = parse_number(expiry),  # Extract numeric values
+    expiry = case_when(
+      # Convert Excel numeric dates (valid values start from 1)
+      !is.na(expiry_num) & expiry_num >= 1 ~ as.Date(excel_numeric_to_date(expiry_num)),
+      
+      # Convert text-based dates like "Apr-25"
+      grepl("^[A-Za-z]{3}-\\d{2}$", expiry) ~ as.Date(paste0("1-", expiry), format = "%d-%b-%y"),
+      
+      # Otherwise, keep as NA
+      TRUE ~ NA_Date_
+    )
+  ) %>%
+  select(-expiry_num) %>%  # Remove helper column
+
+  # Determine if expiry is before last month using `expiry_cutoff`
+  mutate(expired = case_when(
+    
+    # Expiry is after expiry_cutoff → NOT expired
+    expiry >= expiry_cutoff ~ FALSE,
+
+    # Handle expiry in 2025 on days 25, 26, 27, or 28 → NOT expired
+    year(expiry) >= 2024 & day(expiry) %in% c(26, 27, 28) ~ FALSE,
+    
+    year(expiry) == 2024 & day(expiry) %in% c(25) & month(expiry) > 1 ~ FALSE,
+
+    # Handle Excel’s default date issue (1899-12-31) if reported values exist → NOT expired
+    is.na(expiry) & rowSums(across(Jan:Dec, ~ . > 0), na.rm = TRUE) > 0 ~ FALSE,
+
+    # Otherwise, it’s expired
+    TRUE ~ NA
+  ))
+
+inventory %>%
+    filter(is.na(expired)) %>%
+    distinct(expiry) %>% arrange(expiry) %>% print()
+    
+inventory %>%
+    filter(expired==FALSE) %>%
+    distinct(expiry) %>% arrange(expiry) %>% print()
+
+```
+
+The code printed two data.frame for your ease of review. The first one are the dates that will be dropped, and the second one are the dates to be kept. You can do a visual inspection here or open the inventory dataframe and sorting the *expired* column for the tagging. Considerations were to keep:
+
+-   Rows whose date of expiry is later than the reporting period
+
+    -   Example, if reporting period is January, it kept rows whose date is Feb 1 and onward.
+
+-   If expiry date is blank, but inventory cell (for the reporting month) is filled, it retained the row assuming that the product is not expired.
+
+-   If day reported is 26, 27 or 28 and the year reported is 2024 or 2025, this might be a mis-encoded and it is retained.
+
+Let me know if these assumptions does not hold true anymore.
+
+### Step 5.5: Dropping expired inventory and generating SOH
+
+Once we've identify which products are expired, we'll clean our dataset.
+
+```{r}
+inventory_expired <- inventory %>% filter(is.na(expired))
+
+inventory <- inventory %>% filter(!is.na(expired))
+```
+
+You can view the expired rows in dataframe inventory_expired. Validate with sites and manually edit the inventory sheet, then re-run [Part 5: Inventory Data].
+
+```{r}
+            
+# STEP 7: Data set cleaning of latest SOH ---------------------------------------------
+
+# Step 7.1 Summarize total SOH
+inventory_faci <- inventory %>%
+  group_by(region, FacilityName, hub, FileName, numeric_unit, product) %>%
+  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
+  ungroup() %>%
+  select(1:6, reporting_month) %>%
+  mutate(Package = round(get(reporting_month) / numeric_unit, 1))
+
+
+
+# STEP 8: Generate regional summary -----------------------------------------------
+
+inventory_reg <- inventory %>%
+      group_by(region, numeric_unit, product) %>%
+      summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
+  ungroup() %>%
+      select(1:4, reporting_month) %>%
+      mutate(Package = round(get(reporting_month) / numeric_unit, 1))
+
+# STEP 8: Generate national summary -----------------------------------------------
+
+inventory_natl <- inventory %>%
+    group_by(numeric_unit, product) %>%
+    summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
+  ungroup() %>%
+    select(1:3, reporting_month) %>%
+    mutate(Package = round(get(reporting_month) / numeric_unit, 1))
+  
+  
+```
+
+## Part 6: Merging data {data-link="Part 5: Inventory Data"}
+
+### Step 6.1: Merging files to get months-to-last (MTL) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+```{r}
+
+# Combine computed inventory and AMC, generate alerts
+# Updated 18 Mar 2025 Changed merging code from left_join to full_join
+
+# National
+inv_disp_natl <- full_join(inventory_natl, disp_natl %>% select(product, numeric_unit, amc_3_basic, amc_6_basic),
+  by = c("product" = "product", 
+         "numeric_unit" = "numeric_unit")) %>%
+  ungroup () %>%
+  mutate(MTL_amc3 = round((get(reporting_month)/amc_3_basic),1),
+         MTL_amc6 = round((get(reporting_month)/amc_6_basic),1)) %>%
+  mutate(alert_amc3 = case_when(
+      is.infinite(MTL_amc3) | is.na(MTL_amc3) ~ "No report / Check consumption data",
+      MTL_amc3 < 4 ~ "Critical level! Urgent allocation",
+      MTL_amc3 >= 4 & MTL_amc3 < 7 ~ "Low stock! Prepare allocation",
+      MTL_amc3 >= 7 & MTL_amc3 < 10 ~ "Moderate stock. Monitor closely",
+      MTL_amc3 >= 10 ~ "Oversupply. Verify data with CHD. Re-align if needed.",
+      TRUE ~ NA)) %>%
+  arrange(MTL_amc3) %>%
+  relocate(amc_6_basic, MTL_amc6, .after = alert_amc3)
+
+
+# Regional
+inv_disp_reg <- full_join(
+  inventory_reg, 
+  disp_reg %>% select(region, product, numeric_unit, amc_3_basic, amc_6_basic),
+  by = c("region" = "region",
+         "product" = "product", 
+         "numeric_unit" = "numeric_unit")) %>%
+  ungroup () %>%
+  mutate(MTL_amc3 = round((get(reporting_month)/amc_3_basic),1),
+         MTL_amc6 = round((get(reporting_month)/amc_6_basic),1)) %>%
+  mutate(alert_amc3 = case_when(
+      is.infinite(MTL_amc3) | is.na(MTL_amc3) ~ "No report / Check consumption data",
+      MTL_amc3 < 4 ~ "Critical level! Urgent allocation",
+      MTL_amc3 >= 4 & MTL_amc3 < 7 ~ "Low stock! Prepare allocation",
+      MTL_amc3 >= 7 & MTL_amc3 < 10 ~ "Moderate stock. Monitor closely",
+      MTL_amc3 >= 10 ~ "Oversupply. Verify data with CHD. Re-align if needed.",
+      TRUE ~ NA)) %>%
+  arrange(MTL_amc3) %>%
+  relocate(amc_6_basic, MTL_amc6, .after = alert_amc3)
+
+
+# Site-level
+inv_disp_faci <- full_join(inventory_faci, disp %>% 
+       select(FacilityName, FileName, region, product, numeric_unit, amc_3_basic, amc_6_basic),
+  by = c("FacilityName" = "FacilityName", 
+         "FileName" = "FileName", 
+         "region" = "region",
+         "product" = "product", 
+         "numeric_unit" = "numeric_unit")) %>%
+  ungroup () %>%
+  mutate(MTL_amc3 = round((get(reporting_month)/amc_3_basic),1),
+         MTL_amc6 = round((get(reporting_month)/amc_6_basic),1)) %>%
+  mutate(alert_amc3 = case_when(
+      is.infinite(MTL_amc3) | is.na(MTL_amc3) ~ "No report / Check consumption data",
+      MTL_amc3 < 4 ~ "Critical level! Urgent allocation",
+      MTL_amc3 >= 4 & MTL_amc3 < 7 ~ "Low stock! Prepare allocation",
+      MTL_amc3 >= 7 & MTL_amc3 < 10 ~ "Moderate stock. Monitor closely",
+      MTL_amc3 >= 10 ~ "Oversupply. Verify data with CHD. Re-align if needed.",
+      TRUE ~ NA)) %>%
+  arrange(MTL_amc3) %>%
+  relocate(amc_6_basic, MTL_amc6, .after = alert_amc3) %>%
+  left_join(onart %>% select(-hub), by = c("region" = "region", "FacilityName" = "FacilityName", "product" = "product")) %>%
+  select(-FileName, everything(), FileName)
+```
+
+### Step 6.2: Merging files to identify expiring commodities {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Let us forecast wastage in the next six months based on reported AMC and expiry dates.
+
+We will do this at the facility level, and aggregate to regional and national.
+
+```{r}
+
+inventory_with_expiry <- inventory %>%
+  filter(rowSums(select(., Jan:Dec)) != 0)
+
+# Site-level
+expiry <- left_join(inventory_with_expiry, disp %>% 
+                             select(FacilityName, FileName, region, product, numeric_unit, amc_3_basic, amc_6_basic),
+                           by = c("FacilityName" = "FacilityName", 
+                                  "FileName" = "FileName", 
+                                  "region" = "region",
+                                  "product" = "product", 
+                                  "numeric_unit" = "numeric_unit")) %>%
+  mutate(stock = get(reporting_month)) %>%
+  mutate(expiry_end = ceiling_date(expiry, "month") - day(1))
+
+
+# Set the analysis start date (end of January 2025)
+analysis_start <- floor_date(as.Date(paste0("2025-", reporting_month, "-01"), "%Y-%b-%d"), "month") + months(1) - days(1)
+
+# Calculate six months later from the analysis start date
+six_months_later <- floor_date(analysis_start + months(6))
+
+
+                  
+# Updated FIFO Inventory Function with correct logic
+fifo_inventory <- function(data, start_date, reporting_month) {
+  data %>%
+    # Sort by product, facility, and expiry date (FIFO)
+    arrange(product, FacilityName, expiry_end) %>%  
+    group_by(product, FacilityName) %>%
+    mutate(
+      
+      # Calculate months until expiry
+      months_to_expiry = as.integer(interval(start_date, expiry_end) / months(1)),  
+      # Max consumption before expiry
+      max_consumption = amc_3_basic * months_to_expiry,  
+      
+      # Track cumulative stock consumption
+      cumulative_consumption = cumsum(max_consumption),  
+      
+      # FIFO consumed
+      fifo_consumed = as.integer(pmin(stock, max_consumption - lag(cumulative_consumption, default = 0))),  
+      
+      # Remaining stock after consumption
+      remaining_stock = stock - fifo_consumed,  
+      
+      # Wasted stock
+      wastage = ifelse(expiry_end < six_months_later & remaining_stock > 0, remaining_stock, 0),  
+      # Flag batches that will expire
+      will_expire = ifelse(remaining_stock > 0 & cumulative_consumption < stock, "Will Expire", "Consumed")  
+    ) %>%
+    
+    ungroup()
+}
+
+
+# Run the updated FIFO function
+fifo_projection <- fifo_inventory(expiry, analysis_start, six_months_later)
+
+fifo_projection <- fifo_projection %>%
+  select(region, FacilityName, hub, filename, product, numeric_unit, unit_description, expiry,expiry_end, reporting_month, filename, amc_3_basic, fifo_consumed, remaining_stock, wastage, will_expire) %>%
+  mutate(wastage_package = round(wastage/numeric_unit),0)
+
+
+
+
+# Creating regional summary
+
+fifo_projection_reg <- fifo_projection %>%
+  group_by(region, product, numeric_unit, expiry_end, ) %>%
+  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
+  
+
+# Creating national summary
+
+fifo_projection_natl <- fifo_projection %>%
+  group_by(product, numeric_unit,  expiry_end, ) %>%
+  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
+  
+
+fifo_projection_natl_product <- fifo_projection %>%
+  group_by(product, numeric_unit) %>%
+  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
+
+print("Done with Step 6.2")
+```
+
+### Step 6.3: Exporting to Excel {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+```{r}
+
+
+# Define the README content with hyperlinks to other sheets
+readme_content <- data.frame(
+  Sheet = c("Submission rate", 
+            "MTL - National", 
+            "Dispensed - National", 
+            "MTL - Regional", 
+            "Dispensed - Regional",
+            "Inventory - Site level", 
+            "Dispensed - Site level", 
+            "MTL - Site level",
+            "National PLHIV on ART", 
+            "Regional PLHIV on ART", 
+            "Site-level PLHIV on ART",
+            "Proj Consumption - Natl (prod)",
+            "Proj Consumption - National",
+            "Proj Consumption - Regional",
+            "Proj Consumption - Site level"),
+  Description = c(
+    "This sheet provides submission rate summary.",
+    "This sheet provides summary of National stocks per commodity",
+    "This sheet provides summary of National dispensed per commodity",
+    "This sheet contains regional-level SOH as of the reporting period per product with 3-month AMC, computed MTL, and initial alert.",
+    "This sheet contains regional-level past 3 months monthly consumption in basic and package unit and also contains 3-months AMC.",
+    "This sheet contains site-specific monthly inventory levels by product and expiry date.",
+    "This sheet contains site-specific monthly dispensed levels by product.",
+    "This sheet contains site-specific number of PLHIV on ART per ARV, current SOH as of reporting period in basic and package unit, 3-month AMC, computed MTL, and initial alert.",
+    "This sheet contains National monthly number of PLHIV on ART per product.",
+    "This sheet contains Regional monthly number of PLHIV on ART per product.",
+    "This sheet contains site-specific monthly number of PLHIV on ART per product.",
+    "This sheet contains projected National wastage per commodity in the next six months.",
+    "This sheet contains projected National wastage per commodity and date of expiry in the next six months.",
+    "This sheet contains projected Regional wastage per commodity and date of expiry in the next six months.",
+    "This sheet contains projected Site-level wastage per commodity and date of expiry in the next six months."
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Define the data frames
+data_frames <- list(
+  "Submission rate" = sub_rate,
+  "MTL - National" = inv_disp_natl,
+  "Dispensed - National" = disp_natl,
+  "MTL - Regional" = inv_disp_reg,
+  "Dispensed - Regional" = disp_reg,
+  "Inventory - Site level" = inventory,
+  "Dispensed - Site level" = disp,
+  "MTL - Site level" = inv_disp_faci,
+  "National PLHIV on ART" = onart_natl,
+  "Regional PLHIV on ART" = onart_region,
+  "Site-level PLHIV on ART" = onart,
+  "Proj Consumption - Natl (prod)" = fifo_projection_natl_product,
+  "Proj Consumption - National" = fifo_projection_natl,
+  "Proj Consumption - Regional" = fifo_projection_reg,
+  "Proj Consumption - Site level" = fifo_projection
+)
+
+# Add the "README" sheet as the first sheet
+data_frames_with_readme <- c(
+  list("README" = readme_content),  # Add the README sheet first
+  data_frames)  # Add the other data frames
+
+# Create "Consolidated" folder if it doesn't exist
+output_dir <- file.path(getwd(), "Consolidated")
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir)
+}
+
+# Generate timestamp (YYYY-MM-DD_HHMMSS format)
+timestamp <- format(Sys.time(), "%Y-%m-%d_%H%M")
+
+# Define output file name with timestamp
+output_file <- file.path(output_dir, paste0("MIR_consolidation_", reporting_month, "2025_", timestamp, ".xlsx"))
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add each sheet to the workbook with formatting
+for (sheet_name in names(data_frames_with_readme)) {
+  addWorksheet(wb, sheet_name)
+  
+  # Get the data
+  data <- data_frames_with_readme[[sheet_name]]
+  
+  # Write data
+  writeData(wb, sheet = sheet_name, data)
+  
+  # Automatically adjust column widths
+  setColWidths(wb, sheet = sheet_name, cols = 1:ncol(data), widths = "auto")
+  
+  # Apply numeric formatting (comma format) to numeric columns
+  num_cols <- which(sapply(data, is.numeric))  # Identify numeric columns
+  if (length(num_cols) > 0) {
+    for (col in num_cols) {
+      addStyle(wb, sheet_name, 
+               style = createStyle(numFmt = "#,##0"),  # Comma format
+               cols = col, rows = 2:(nrow(data) + 1), gridExpand = TRUE)
+    }
+  }
+}
+
+# Add hyperlinks in the README sheet to the respective sheets
+
+for (i in 1:nrow(readme_content)) {
+  sheet_name <- readme_content$Sheet[i]
+  
+  # Create Excel formula-style hyperlink to the sheet
+  hyperlink_formula <- sprintf("HYPERLINK(\"#'%s'!A1\", \"%s\")", sheet_name, paste0(sheet_name))
+  
+  # Write the hyperlink formula into the README sheet
+  writeFormula(wb, sheet = "README", x = hyperlink_formula, startRow = i + 1, startCol = 1)
+}
+
+
+# Save the workbook
+saveWorkbook(wb, output_file, overwrite = TRUE)
+
+# Print confirmation message
+cat("Workbook saved to:", output_file, "\n")
+
+print("Done with Step 6.3")
+```
+
+## Part 7: Generating a regional summary
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(scales)  # For comma formatting
+
+# Add 'region' variable to inv_disp_natl
+inv_disp_natl <- inv_disp_natl %>%
+  mutate(region = "PH")
+
+# Append inv_disp_natl to inv_disp_reg
+inv_disp_reg <- bind_rows(inv_disp_reg, inv_disp_natl)
+
+# Define product renaming mapping
+product_rename <- c(
+  "Pre-exposure Prophylaxis" = "PrEP",
+  "HIV Self Test" = "HIV STK",
+  "HIV RDT 2 (Confirmation)" = "HIV RDT 2",
+  "HIV RDT 3 (Re-confirmation)" = "HIV RDT 3",
+  "Lamivudine 300mg + Tenofovir 300mg + Dolutegravir 50mg" = "TLD",
+  "Lamivudine 300mg + Tenofovir 300mg + Efavirenz 600mg" = "LTE",
+  "HIV VIRAL LOAD Point of Care Cartridge" = "VL POC"
+)
+
+# Define relevant products and their new order
+relevant_products <- names(product_rename)
+product_order <- unname(product_rename)
+
+# Filter for relevant products
+inv_disp_reg_filtered <- inv_disp_reg %>%
+  filter(product %in% relevant_products)
+
+# Rename products using the mapping
+inv_disp_reg_filtered$product <- product_rename[inv_disp_reg_filtered$product]
+
+# Define custom region order (in reverse so RO1 appears on top)
+region_order <- rev(c(
+  "PH", "RO1", "RO2", "CAR", "RO3", "NCR", "R4A", "R4B", "RO5",
+  "RO6", "NIR", "RO7", "RO8", "RO9", "R10", "R11", "R12", "CARAGA", "BARMM"
+))
+
+# Create the dashboard data by region and product
+dashboard_data <- inv_disp_reg_filtered %>%
+  group_by(region, product) %>%
+  summarise(
+    avg_amc_3_basic = mean(amc_3_basic, na.rm = TRUE),
+    avg_MTL_amc3 = mean(MTL_amc3, na.rm = TRUE),
+    stock_level = first(alert_amc3),  # Assuming alert is the same for all products in a region
+    Package = first(Package),  # Retrieve the package value
+    MTL = first(MTL_amc3),  # Retrieve the MTL value
+    .groups = 'drop'
+  ) %>%
+  mutate(stock_level = 
+           case_when(
+             stock_level == "Critical level! Urgent allocation" ~ "Critical level! Urgent allocation (<4 MTL)",
+             stock_level == "Low stock! Prepare allocation" ~ "Low stock! Prepare allocation (4-6 MTL)",
+             stock_level == "Moderate stock. Monitor closely" ~ "Moderate stock. Monitor closely (7-9 MTL)",
+             stock_level == "Oversupply. Verify data with CHD. Re-align if needed." ~ "Oversupply. Verify data with CHD. Re-align if needed. (10+ MTL)",
+             TRUE ~ stock_level
+           ))
+
+# Ensure the region and product are in the specified order
+dashboard_data$region <- factor(dashboard_data$region, levels = region_order)
+dashboard_data$product <- factor(dashboard_data$product, levels = product_order)
+
+# Define a color palette based on stock levels
+dashboard_data$stock_level_color <- case_when(
+  dashboard_data$stock_level == "Critical level! Urgent allocation (<4 MTL)" ~ "#c43d4d",
+  dashboard_data$stock_level == "Low stock! Prepare allocation (4-6 MTL)" ~ "#f2bc40",
+  dashboard_data$stock_level == "Moderate stock. Monitor closely (7-9 MTL)" ~ "#1e87a5",
+  dashboard_data$stock_level == "Oversupply. Verify data with CHD. Re-align if needed. (10+ MTL)" ~ "#287c67",
+  TRUE ~ "white"
+)
+
+# Format labels with handling for NA and Inf values
+dashboard_data$label_text <- ifelse(
+  is.na(dashboard_data$Package) & is.na(dashboard_data$MTL), 
+  "No report",
+  ifelse(is.infinite(dashboard_data$MTL), 
+         sprintf("%s (No consumption reported)", comma(dashboard_data$Package)), 
+         sprintf("%s (%s MTL)", comma(dashboard_data$Package), comma(dashboard_data$MTL)))
+)
+
+# Plot the data using geom_tile and add formatted labels, along with a legend
+plot_regional <- ggplot(dashboard_data, aes(x = product, y = region, fill = stock_level)) +
+  geom_tile() +
+  scale_fill_manual(values = c(
+    "Critical level! Urgent allocation (<4 MTL)" = "#c43d4d",
+    "Low stock! Prepare allocation (4-6 MTL)" = "#f2bc40",
+    "Moderate stock. Monitor closely (7-9 MTL)" = "#1e87a5",
+    "Oversupply. Verify data with CHD. Re-align if needed. (10+ MTL)" = "#287c67"
+  )) + # Manually define colors for the legend
+  geom_text(aes(label = label_text), 
+            color = "white", 
+            size = 4) +  # Centered text
+  labs(
+    title = paste("Months-to-last (MTL) Heatmap by Region and Product as of",reporting_month,"2025", sep = " "),
+    x = "Product",
+    y = "Region",
+    fill = "Stock Level",  # Label for the legend
+    subtitle = "Values presented are the available units of package and months-to-last"
+  ) +
+  theme_minimal() +  # Apply minimal theme
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 1),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.position = "bottom"  # Place legend at bottom
+  )
+
+# Construct the file name
+file_name <- paste("regional_", reporting_month, "2025", sep = "_") 
+
+# Define the file path
+file_path <- paste("Consolidated/", file_name, ".pdf", sep = "")
+
+# Export the plot as a 16:9 slide to PDF
+ggsave(file_path, plot = plot_regional, width = 16, height = 9, units = "in", dpi = 300)
+
+# Check that the file has been saved
+print(paste("Plot saved to:", file_path))
+
+```
+
+## Part 8: Saving the files for future use
+
+```{r}
+output_dir <- file.path(getwd(), "R File Output")
+
+# Create the folder if it doesn't exist
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir)
+}
+
+# Get all objects in the environment
+objects <- ls()
+
+
+# Get all objects in the environment
+objects <- ls()
+
+# Save each object as a separate .rds file
+for (obj in objects) {
+  saveRDS(get(obj), file = file.path(output_dir, paste0(obj, ".rds")))
+}
+
+# To reload an individual object later:
+# my_data <- readRDS(file.path(output_dir, "object_name.rds"))
+
+```
