@@ -2,6 +2,7 @@
 title: "MIR 2025 Consolidation"
 format: html
 editor: visual
+author: Clarenze Joy Sagun
 ---
 
 # MIR Consolidation 2025
@@ -71,17 +72,15 @@ replace the month in "[Mon]{.underline}" using the notation below
 ```{r}
 
 # Define Reporting Month 
-reporting_month <- "Feb" # <- replace this 
+reporting_month <- "Apr" # <- replace this 
 
 #Select from the following  
 #Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec
 
 
-# Define Past 3 months
-p3m <- c("Dec24","Jan","Feb") # <- replace this 
 
-#Select from the following  
-#Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec
+print(paste0("Analysis for ", reporting_month, " 2025"))
+
 ```
 
 ### Step 1.4: Extract facility names from General Input Sheet
@@ -776,24 +775,46 @@ disp %>% distinct(product, numeric_unit) %>% arrange(product)
 
 You can add rows to correct the numeric_unit before the line "TRUE \~ numeric_unit". Just copy the notation provided. Rerun [Step 4.3: Clean Product x Numeric Unit] once you've added your changes.
 
-### \<SPECIAL FOR JANUARY\> Step 4.4: Computing for the average monthly consumption (site-level) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+### Step 4.4: Computing for the average monthly consumption (site-level) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
 
 Now we'll compute for the average monthly consumption (AMC) in the past 3 and 6 months. AMC-6 will only be available starting April reporting period.
 
+Make sure you've updated [Step 1.3: Set the reporting month].
+
 ```{r}
 month_order <- c("Nov24","Dec24","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+# Locate the reporting month
+amc_index <- which(month_order == reporting_month)
+
+# Extract the last 3 & 6 months, ensuring no out-of-bounds indexing
+p3m <- if (amc_index >= 3) month_order[(amc_index - 2):amc_index] else character(0)
+p6m <- if (amc_index >= 6) month_order[(amc_index - 5):amc_index] else character(0)
 
 disp <- disp %>%
   mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
   mutate(
     sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
     count = rowSums(!is.na(select(., all_of(p3m)))),
-    amc_3_basic = ifelse(is.nan(round(sum/count)),0,round(sum/count, 1)),
-    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)),0,round(amc_3_basic / numeric_unit, 1)),
-    amc_6_basic = NA,
-    amc_6_package = NA
-  ) %>%
-  select(-sum, -count)
+    amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
+    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
+  )
+
+# Only compute sum6, count6, amc_6_basic if amc_index >= 6
+if (amc_index >= 6) {
+  disp <- disp %>%
+    mutate(
+      sum6 = rowSums(select(., all_of(p6m)), na.rm = TRUE),
+      count6 = rowSums(!is.na(select(., all_of(p6m)))),
+      amc_6_basic = ifelse(is.nan(round(sum6 / count6, 1)), 0, round(sum6 / count6, 1)),
+      amc_6_package = ifelse(is.nan(round(amc_6_basic / numeric_unit, 1)), 0, round(amc_6_basic / numeric_unit, 1))
+    ) %>%
+    select(-sum, -count, -sum6, -count6)
+} else {
+  disp <- disp %>%
+    select(-sum, -count)  # Remove unnecessary columns
+}
+
 ```
 
 At this point, we've added columns on *disp* dataframe for amc_3 and amc_6 for basic and package.
@@ -802,25 +823,35 @@ At this point, we've added columns on *disp* dataframe for amc_3 and amc_6 for b
 
 ```{r}
 
-# STEP 8: Generate national and regional summary -----------------------------------------------
 
-# Regional
+# --- Regional Level ---
 disp_reg <- disp %>%
   group_by(region, numeric_unit, product) %>%
-  summarise(across(all_of(month_order), sum, na.rm = TRUE), .groups = "drop") %>% # Ensure proper grouping
+  summarise(across(all_of(month_order), sum, na.rm = TRUE), .groups = "drop") %>%
   mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
   mutate(
     sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
     count = rowSums(!is.na(select(., all_of(p3m)))),
-    amc_3_basic = ifelse(is.nan(round(sum/count)),0,round(sum/count, 1)),
-    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)),0,round(amc_3_basic / numeric_unit, 1)),
-    amc_6_basic = NA,
-    amc_6_package = NA
-  ) %>%
-  select(-sum, -count)
+    amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
+    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
+  )
 
+# Compute AMC-6 only if amc_index >= 6
+if (amc_index >= 6) {
+  disp_reg <- disp_reg %>%
+    mutate(
+      sum6 = rowSums(select(., all_of(p6m)), na.rm = TRUE),
+      count6 = rowSums(!is.na(select(., all_of(p6m)))),
+      amc_6_basic = ifelse(is.nan(round(sum6 / count6, 1)), 0, round(sum6 / count6, 1)),
+      amc_6_package = ifelse(is.nan(round(amc_6_basic / numeric_unit, 1)), 0, round(amc_6_basic / numeric_unit, 1))
+    ) %>%
+    select(-sum, -count, -sum6, -count6)
+} else {
+  disp_reg <- disp_reg %>%
+    select(-sum, -count)
+}
 
-# National
+# --- National Level ---
 disp_natl <- disp %>%
   group_by(numeric_unit, product) %>%
   summarise(across(all_of(month_order), sum, na.rm = TRUE), .groups = "drop") %>%
@@ -828,14 +859,27 @@ disp_natl <- disp %>%
   mutate(
     sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
     count = rowSums(!is.na(select(., all_of(p3m)))),
-    amc_3_basic = ifelse(is.nan(round(sum/count)),0,round(sum/count, 1)),
-    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)),0,round(amc_3_basic / numeric_unit, 1)),
-    amc_6_basic = NA,
-    amc_6_package = NA
-  ) %>%
-  select(-sum, -count)
+    amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
+    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
+  )
 
-print("Done generating regional and national dispensing dataframe.")
+# Compute AMC-6 only if amc_index >= 6
+if (amc_index >= 6) {
+  disp_natl <- disp_natl %>%
+    mutate(
+      sum6 = rowSums(select(., all_of(p6m)), na.rm = TRUE),
+      count6 = rowSums(!is.na(select(., all_of(p6m)))),
+      amc_6_basic = ifelse(is.nan(round(sum6 / count6, 1)), 0, round(sum6 / count6, 1)),
+      amc_6_package = ifelse(is.nan(round(amc_6_basic / numeric_unit, 1)), 0, round(amc_6_basic / numeric_unit, 1))
+    ) %>%
+    select(-sum, -count, -sum6, -count6)
+} else {
+  disp_natl <- disp_natl %>%
+    select(-sum, -count)
+}
+
+print("Done generating regional and national dispensing data frames.")
+
 ```
 
 We now have three disp data frames:
