@@ -3,6 +3,7 @@ title: "MIR 2025 Consolidation"
 format: html
 editor: visual
 author: Clarenze Joy Sagun
+collaborators: Jallisa Reyes, Charlene Tinaja, Nestor Los Anes
 ---
 
 # MIR Consolidation 2025
