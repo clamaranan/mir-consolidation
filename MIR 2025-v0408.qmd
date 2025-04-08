@@ -27,6 +27,7 @@ You only need to run this code if this is your first time to install the librari
 # install.packages('writexl')
 # install.packages('lubridate')
 # install.packages('openxlsx')
+# install.packages('janitor')
 # install.packages('readr')
 
 print("End of Step 1.1")
@@ -59,7 +60,7 @@ folder_path <- getwd()
 excel_files <- list.files(path = folder_path, pattern = "^[^~].*\\.xlsx$", full.names = TRUE)
 
 # Print the count of captured Excel files
-cat("Number of Excel files captured:", length(excel_files), "\n")
+cat("\n","Number of Excel files captured:", length(excel_files), "\n")
 ```
 
 #### -\> REVIEW: Make sure the "excel_files" on the right matches your expected files to be loaded.
@@ -73,7 +74,7 @@ replace the month in "[Mon]{.underline}" using the notation below
 ```{r}
 
 # Define Reporting Month 
-reporting_month <- "Apr" # <- replace this 
+reporting_month <- "Feb" # <- replace this 
 
 #Select from the following  
 #Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec
@@ -214,9 +215,9 @@ region_facilities <- tibble(
   region = c("RO1", "RO2", "RO3", "R4A", "R4B", "RO5", "RO6", 
              "NIR", "RO7", "RO8", "RO9", "R10", "R11", "R12", 
              "CRG", "BARMM", "CAR", "NCR"),
- total_facilities = c(6, 4, 34, 38, 5, 5, 18, 
-                      1, 18, 16, 12, 8, 4, 16, 
-                      5, 2, 7, 57))
+ total_facilities = c(6, 4, 34, 42, 5, 8, 28, 
+                      1, 19, 16, 12, 8, 4, 16, 
+                      5, 2, 7, 62))
 
 # Summarize unique hubs and add missing regions
 sub_rate <- faci_name %>%
@@ -349,6 +350,7 @@ onart <- onart %>%
 rm(inputs_data_list)
 
 # Print the string captured
+cat("Captured Non-numeric Values", "\n")
 unique(onart$combined_non_numeric)
 
 
@@ -607,6 +609,7 @@ cleaned_cols <- paste0(month_cols, "_cleaned")               # Cleaned month col
       unite("combined_non_numeric", all_of(non_numeric_cols), na.rm = TRUE, remove = TRUE, sep = "; ")
 
   # Print the string captured
+    cat("\n","Captured Non-numeric Values", "\n")
     unique(disp$combined_non_numeric)
 
 
@@ -799,7 +802,8 @@ disp <- disp %>%
     count = rowSums(!is.na(select(., all_of(p3m)))),
     amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
     amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
-  )
+  ) %>%
+  mutate(amc_6_basic = NA)
 
 # Only compute sum6, count6, amc_6_basic if amc_index >= 6
 if (amc_index >= 6) {
@@ -816,6 +820,7 @@ if (amc_index >= 6) {
     select(-sum, -count)  # Remove unnecessary columns
 }
 
+print("End of Step 4.4: Computing for the average monthly consumption (site-level)")
 ```
 
 At this point, we've added columns on *disp* dataframe for amc_3 and amc_6 for basic and package.
@@ -835,7 +840,8 @@ disp_reg <- disp %>%
     count = rowSums(!is.na(select(., all_of(p3m)))),
     amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
     amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
-  )
+  ) %>%
+  mutate(amc_6_basic = NA)
 
 # Compute AMC-6 only if amc_index >= 6
 if (amc_index >= 6) {
@@ -862,7 +868,8 @@ disp_natl <- disp %>%
     count = rowSums(!is.na(select(., all_of(p3m)))),
     amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
     amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
-  )
+  ) %>%
+  mutate(amc_6_basic = NA)
 
 # Compute AMC-6 only if amc_index >= 6
 if (amc_index >= 6) {
@@ -879,8 +886,7 @@ if (amc_index >= 6) {
     select(-sum, -count)
 }
 
-print("Done generating regional and national dispensing data frames.")
-
+print("End of Step 4.5: Computing for the average monthly consumption (regional/national)")
 ```
 
 We now have three disp data frames:
@@ -988,6 +994,7 @@ Now we'll consolidate the inventory sheet into one. This might take a while (aga
     rm(inventory_data_list)
     
   # Print the string captured
+    cat("\n","Captured Non-numeric Values", "\n")
     unique(inventory$combined_non_numeric)
 
 ```
@@ -1225,6 +1232,8 @@ inventory_expired <- inventory %>% filter(is.na(expired))
 inventory <- inventory %>% filter(!is.na(expired))
 ```
 
+#### -\> REVIEW the expired inventory list
+
 You can view the expired rows in dataframe inventory_expired. Validate with sites and manually edit the inventory sheet, then re-run [Part 5: Inventory Data].
 
 ```{r}
@@ -1237,7 +1246,8 @@ inventory_faci <- inventory %>%
   summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
   ungroup() %>%
   select(1:6, reporting_month) %>%
-  mutate(Package = round(get(reporting_month) / numeric_unit, 1))
+  mutate(Package = round(get(reporting_month) / numeric_unit, 1)) %>%
+  rename(!!paste0(reporting_month, "_inventory") := all_of(reporting_month))
 
 
 
@@ -1247,8 +1257,9 @@ inventory_reg <- inventory %>%
       group_by(region, numeric_unit, product) %>%
       summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
   ungroup() %>%
-      select(1:4, reporting_month) %>%
-      mutate(Package = round(get(reporting_month) / numeric_unit, 1))
+      select(1:3, reporting_month) %>%
+      mutate(Package = round(get(reporting_month) / numeric_unit, 1))  %>%
+  rename(!!paste0(reporting_month, "_inventory") := all_of(reporting_month))
 
 # STEP 8: Generate national summary -----------------------------------------------
 
@@ -1256,82 +1267,142 @@ inventory_natl <- inventory %>%
     group_by(numeric_unit, product) %>%
     summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
   ungroup() %>%
-    select(1:3, reporting_month) %>%
-    mutate(Package = round(get(reporting_month) / numeric_unit, 1))
+    select(1:2, reporting_month) %>%
+    mutate(Package = round(get(reporting_month) / numeric_unit, 1)) %>%
+  rename(!!paste0(reporting_month, "_inventory") := all_of(reporting_month))
   
-  
+print("End of Step 5.5: Dropping expired inventory and generating SOH")  
 ```
 
 ## Part 6: Merging data {data-link="Part 5: Inventory Data"}
 
-### Step 6.1: Merging files to get months-to-last (MTL) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+### Step 6.1: Merging files to get months-of-supply (MOS) {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+-   critical = this will be the upper limit for the critical stock level
+
+-   low_stock = this will be the upper limit for the low_stock
+
+-   moderate stock = this will be the upper limit for the low_stock, and lower limit for the oversupply
+
+#### -\> REVIEW the cutoff values below that will be ran for this analysis. Change the values in this code block
+
+```{r}
+# Define user-modifiable cutoffs
+cutoff_values <- list(
+  critical = 4,         # <-- EDIT THIS
+  low_stock = 7,         # <-- EDIT THIS
+  moderate_stock = 10    # <-- EDIT THIS
+)
+
+
+# Define corresponding messages
+stock_messages <- list(
+  critical = "Critical level! Urgent allocation",
+  low_stock = "Low stock! Prepare allocation",
+  moderate_stock = "Moderate stock. Monitor closely",
+  oversupply = "Oversupply. Verify data with CHD/Site. Re-align if needed."
+)
+
+# Print the summary
+cat("Stock Level Cutoff Summary:\n\n")
+cat(sprintf("≤ %d months: %s\n", cutoff_values$critical, stock_messages$critical))
+cat(sprintf("> %d and ≤ %d months: %s\n", cutoff_values$critical, cutoff_values$low_stock, stock_messages$low_stock))
+cat(sprintf("> %d and ≤ %d months: %s\n", cutoff_values$low_stock, cutoff_values$moderate_stock, stock_messages$moderate_stock))
+cat(sprintf("> %d months: %s\n", cutoff_values$moderate_stock, stock_messages$oversupply))
+```
+
+#### -\> REVIEW the cutoff values above that will be ran for this analysis. Change the values in this code block above
 
 ```{r}
 
 # Combine computed inventory and AMC, generate alerts
 # Updated 18 Mar 2025 Changed merging code from left_join to full_join
+reporting_month_inventory <- paste0(reporting_month, "_inventory")
+p3m_disp <- paste0(p3m, "_disp")
 
 # National
-inv_disp_natl <- full_join(inventory_natl, disp_natl %>% select(product, numeric_unit, amc_3_basic, amc_6_basic),
+inv_disp_natl <- full_join(inventory_natl, disp_natl %>% select(product, numeric_unit, all_of(p3m), amc_3_basic, amc_6_basic),
   by = c("product" = "product", 
          "numeric_unit" = "numeric_unit")) %>%
   ungroup () %>%
-  mutate(MTL_amc3 = round((get(reporting_month)/amc_3_basic),1),
-         MTL_amc6 = round((get(reporting_month)/amc_6_basic),1)) %>%
+  mutate(MOS_amc3 = round((get(reporting_month_inventory)/amc_3_basic),1),
+         MOS_amc6 = round((get(reporting_month_inventory)/amc_6_basic),1)) %>%
   mutate(alert_amc3 = case_when(
-      is.infinite(MTL_amc3) | is.na(MTL_amc3) ~ "No report / Check consumption data",
-      MTL_amc3 < 4 ~ "Critical level! Urgent allocation",
-      MTL_amc3 >= 4 & MTL_amc3 < 7 ~ "Low stock! Prepare allocation",
-      MTL_amc3 >= 7 & MTL_amc3 < 10 ~ "Moderate stock. Monitor closely",
-      MTL_amc3 >= 10 ~ "Oversupply. Verify data with CHD. Re-align if needed.",
+      is.infinite(MOS_amc3) | is.na(MOS_amc3) ~ "No report / Check consumption data",
+      MOS_amc3 < cutoff_values$critical ~ "Critical level! Urgent allocation",
+      MOS_amc3 >= cutoff_values$critical & MOS_amc3 < cutoff_values$low_stock ~ "Low stock! Prepare allocation",
+      MOS_amc3 >= cutoff_values$low_stock & MOS_amc3 < cutoff_values$moderate_stock ~ "Moderate stock. Monitor closely",
+      MOS_amc3 >= cutoff_values$moderate_stock ~ "Oversupply. Verify data with CHD/Site. Re-align if needed.",
       TRUE ~ NA)) %>%
-  arrange(MTL_amc3) %>%
-  relocate(amc_6_basic, MTL_amc6, .after = alert_amc3)
+  arrange(MOS_amc3) %>%
+  relocate(amc_6_basic, MOS_amc6, .after = alert_amc3) %>%
+  rename_with(~ paste0(.x, "_disp"), all_of(p3m))
 
 
 # Regional
 inv_disp_reg <- full_join(
   inventory_reg, 
-  disp_reg %>% select(region, product, numeric_unit, amc_3_basic, amc_6_basic),
+  disp_reg %>% select(region, product, numeric_unit, all_of(p3m),amc_3_basic, amc_6_basic),
   by = c("region" = "region",
          "product" = "product", 
          "numeric_unit" = "numeric_unit")) %>%
   ungroup () %>%
-  mutate(MTL_amc3 = round((get(reporting_month)/amc_3_basic),1),
-         MTL_amc6 = round((get(reporting_month)/amc_6_basic),1)) %>%
+  mutate(MOS_amc3 = round((get(reporting_month_inventory)/amc_3_basic),1),
+         MOS_amc6 = round((get(reporting_month_inventory)/amc_6_basic),1)) %>%
   mutate(alert_amc3 = case_when(
-      is.infinite(MTL_amc3) | is.na(MTL_amc3) ~ "No report / Check consumption data",
-      MTL_amc3 < 4 ~ "Critical level! Urgent allocation",
-      MTL_amc3 >= 4 & MTL_amc3 < 7 ~ "Low stock! Prepare allocation",
-      MTL_amc3 >= 7 & MTL_amc3 < 10 ~ "Moderate stock. Monitor closely",
-      MTL_amc3 >= 10 ~ "Oversupply. Verify data with CHD. Re-align if needed.",
+      is.infinite(MOS_amc3) | is.na(MOS_amc3) ~ "No report / Check consumption data",
+      MOS_amc3 < cutoff_values$critical ~ "Critical level! Urgent allocation",
+      MOS_amc3 >= cutoff_values$critical & MOS_amc3 < cutoff_values$low_stock ~ "Low stock! Prepare allocation",
+      MOS_amc3 >= cutoff_values$low_stock & MOS_amc3 < cutoff_values$moderate_stock ~ "Moderate stock. Monitor closely",
+      MOS_amc3 >= cutoff_values$moderate_stock ~ "Oversupply. Verify data with CHD/Site. Re-align if needed.",
       TRUE ~ NA)) %>%
-  arrange(MTL_amc3) %>%
-  relocate(amc_6_basic, MTL_amc6, .after = alert_amc3)
+  arrange(MOS_amc3) %>%
+  relocate(amc_6_basic, MOS_amc6, .after = alert_amc3) %>%
+  rename_with(~ paste0(.x, "_disp"), all_of(p3m))
 
 
 # Site-level
 inv_disp_faci <- full_join(inventory_faci, disp %>% 
-       select(FacilityName, FileName, region, product, numeric_unit, amc_3_basic, amc_6_basic),
+       select(FacilityName, FileName, region, product, numeric_unit, all_of(p3m),amc_3_basic, amc_6_basic),
   by = c("FacilityName" = "FacilityName", 
          "FileName" = "FileName", 
          "region" = "region",
          "product" = "product", 
          "numeric_unit" = "numeric_unit")) %>%
   ungroup () %>%
-  mutate(MTL_amc3 = round((get(reporting_month)/amc_3_basic),1),
-         MTL_amc6 = round((get(reporting_month)/amc_6_basic),1)) %>%
+  mutate(MOS_amc3 = round((get(reporting_month_inventory)/amc_3_basic),1),
+         MOS_amc6 = round((get(reporting_month_inventory)/amc_6_basic),1)) %>%
   mutate(alert_amc3 = case_when(
-      is.infinite(MTL_amc3) | is.na(MTL_amc3) ~ "No report / Check consumption data",
-      MTL_amc3 < 4 ~ "Critical level! Urgent allocation",
-      MTL_amc3 >= 4 & MTL_amc3 < 7 ~ "Low stock! Prepare allocation",
-      MTL_amc3 >= 7 & MTL_amc3 < 10 ~ "Moderate stock. Monitor closely",
-      MTL_amc3 >= 10 ~ "Oversupply. Verify data with CHD. Re-align if needed.",
+      is.infinite(MOS_amc3) | is.na(MOS_amc3) ~ "No report / Check consumption data",
+      MOS_amc3 < cutoff_values$critical ~ "Critical level! Urgent allocation",
+      MOS_amc3 >= cutoff_values$critical & MOS_amc3 < cutoff_values$low_stock ~ "Low stock! Prepare allocation",
+      MOS_amc3 >= cutoff_values$low_stock & MOS_amc3 < cutoff_values$moderate_stock ~ "Moderate stock. Monitor closely",
+      MOS_amc3 >= cutoff_values$moderate_stock ~ "Oversupply. Verify data with CHD/Site. Re-align if needed.",
       TRUE ~ NA)) %>%
-  arrange(MTL_amc3) %>%
-  relocate(amc_6_basic, MTL_amc6, .after = alert_amc3) %>%
+  arrange(MOS_amc3) %>%
+  relocate(amc_6_basic, MOS_amc6, .after = alert_amc3) %>%
   left_join(onart %>% select(-hub), by = c("region" = "region", "FacilityName" = "FacilityName", "product" = "product")) %>%
-  select(-FileName, everything(), FileName)
+  select(-FileName, everything(), FileName) %>%
+  rename_with(~ paste0(.x, "_disp"), all_of(p3m)) %>%
+  mutate(hub = if_else(
+    is.na(hub),
+    str_trim(str_replace_all(substr(FileName, 5, nchar(FileName)), c("- " = "", "– " = "", "\\.xlsx$" = ""))),
+    hub
+  )) 
+
+
+# Site-level
+allocation_tool <- inv_disp_faci %>%
+  select(region, product, FacilityName, hub, all_of(reporting_month_inventory), amc_3_basic, all_of(p3m_disp), on_art, numeric_unit) %>% 
+  mutate(onart_cons = on_art * numeric_unit,
+         adj_amc = rowMeans(across(c(onart_cons, amc_3_basic)), na.rm = TRUE)) %>%
+  relocate(all_of(reporting_month_inventory), .after = adj_amc) %>%
+  relocate(amc_3_basic, .before = on_art) %>%
+  relocate(numeric_unit, .after = all_of(reporting_month_inventory)) %>%
+  arrange(region, product, FacilityName)
+
+
+print("Done with Step 6.1: Merging files to get months-of-supply (MOS)")
 ```
 
 ### Step 6.2: Merging files to identify expiring commodities {data-link="Step 1.3: Extract facility names from General Input Sheet"}
@@ -1347,12 +1418,12 @@ inventory_with_expiry <- inventory %>%
 
 # Site-level
 expiry <- left_join(inventory_with_expiry, disp %>% 
-                             select(FacilityName, FileName, region, product, numeric_unit, amc_3_basic, amc_6_basic),
-                           by = c("FacilityName" = "FacilityName", 
-                                  "FileName" = "FileName", 
-                                  "region" = "region",
-                                  "product" = "product", 
-                                  "numeric_unit" = "numeric_unit")) %>%
+                      select(FacilityName, FileName, region, product, numeric_unit, amc_3_basic, amc_6_basic),
+                    by = c("FacilityName" = "FacilityName", 
+                           "FileName" = "FileName", 
+                           "region" = "region",
+                           "product" = "product", 
+                           "numeric_unit" = "numeric_unit")) %>%
   mutate(stock = get(reporting_month)) %>%
   mutate(expiry_end = ceiling_date(expiry, "month") - day(1))
 
@@ -1364,44 +1435,53 @@ analysis_start <- floor_date(as.Date(paste0("2025-", reporting_month, "-01"), "%
 six_months_later <- floor_date(analysis_start + months(6))
 
 
-                  
-# Updated FIFO Inventory Function with correct logic
-fifo_inventory <- function(data, start_date, reporting_month) {
+fefo_inventory <- function(data) {
+  # Ensure data is ordered properly
   data %>%
-    # Sort by product, facility, and expiry date (FIFO)
-    arrange(product, FacilityName, expiry_end) %>%  
+    # Sort in First-Expiry-First-Out (FEFO) order
+    arrange(product, FacilityName, expiry_end) %>%
     group_by(product, FacilityName) %>%
     mutate(
+      # Calculate the start date dynamically (e.g., earliest expiry date)
+      analysis_start_date = analysis_start+days(0),  # Or set it to the minimum expiry_end date
       
-      # Calculate months until expiry
-      months_to_expiry = as.integer(interval(start_date, expiry_end) / months(1)),  
-      # Max consumption before expiry
+      # Calculate months to expiry
+      months_to_expiry = as.integer(interval(analysis_start_date, expiry_end) / months(1)),  
+      
+      # Max consumption per batch
       max_consumption = amc_3_basic * months_to_expiry,  
       
-      # Track cumulative stock consumption
-      cumulative_consumption = cumsum(max_consumption),  
+      # Total demand (sum of max consumption for all batches)
+      total_demand = sum(max_consumption),
       
-      # FIFO consumed
-      fifo_consumed = as.integer(pmin(stock, max_consumption - lag(cumulative_consumption, default = 0))),  
+      # Track cumulative stock consumption
+      cumulative_consumption = cumsum(max_consumption),
+      
+      # Carry over demand if previous batch was insufficient
+      prev_stock = lag(stock, default = 0),
+      prev_max_consumption = lag(max_consumption, default = 0),
+      carryover_demand = pmax(0, prev_max_consumption - prev_stock),  
+      
+      # Adjust FEFO consumption by considering carryover demand
+      fefo_consumed = pmin(stock, max_consumption + carryover_demand - lag(cumulative_consumption, default = 0)),  
       
       # Remaining stock after consumption
-      remaining_stock = stock - fifo_consumed,  
+      remaining_stock = stock - fefo_consumed,  
       
-      # Wasted stock
-      wastage = ifelse(expiry_end < six_months_later & remaining_stock > 0, remaining_stock, 0),  
-      # Flag batches that will expire
-      will_expire = ifelse(remaining_stock > 0 & cumulative_consumption < stock, "Will Expire", "Consumed")  
+      # Wasted stock (if expired)
+      wastage = ifelse(expiry_end < (analysis_start_date + months(6)) & remaining_stock > 0, remaining_stock, 0),  
+      
+      # Flag for batches that will expire
+      will_expire = ifelse(remaining_stock > 0, "Will Expire", "Consumed")  
     ) %>%
-    
     ungroup()
 }
 
+# Run the updated FEFO function on your data
+fefo_projection <- fefo_inventory(expiry)
 
-# Run the updated FIFO function
-fifo_projection <- fifo_inventory(expiry, analysis_start, six_months_later)
-
-fifo_projection <- fifo_projection %>%
-  select(region, FacilityName, hub, filename, product, numeric_unit, unit_description, expiry,expiry_end, reporting_month, filename, amc_3_basic, fifo_consumed, remaining_stock, wastage, will_expire) %>%
+fefo_projection <- fefo_projection %>%
+  select(region, FacilityName, hub, filename, product, numeric_unit, unit_description, expiry,expiry_end, reporting_month, filename, amc_3_basic, fefo_consumed, remaining_stock, wastage, will_expire) %>%
   mutate(wastage_package = round(wastage/numeric_unit),0)
 
 
@@ -1409,23 +1489,23 @@ fifo_projection <- fifo_projection %>%
 
 # Creating regional summary
 
-fifo_projection_reg <- fifo_projection %>%
+fefo_projection_reg <- fefo_projection %>%
   group_by(region, product, numeric_unit, expiry_end, ) %>%
   summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
   
 
 # Creating national summary
 
-fifo_projection_natl <- fifo_projection %>%
+fefo_projection_natl <- fefo_projection %>%
   group_by(product, numeric_unit,  expiry_end, ) %>%
   summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
   
 
-fifo_projection_natl_product <- fifo_projection %>%
+fefo_projection_natl_product <- fefo_projection %>%
   group_by(product, numeric_unit) %>%
   summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
 
-print("Done with Step 6.2")
+cat("\n","Done with Step 6.2")
 ```
 
 ### Step 6.3: Exporting to Excel {data-link="Step 1.3: Extract facility names from General Input Sheet"}
@@ -1436,36 +1516,38 @@ print("Done with Step 6.2")
 # Define the README content with hyperlinks to other sheets
 readme_content <- data.frame(
   Sheet = c("Submission rate", 
-            "MTL - National", 
+            "MOS - National", 
             "Dispensed - National", 
-            "MTL - Regional", 
+            "MOS - Regional", 
             "Dispensed - Regional",
             "Inventory - Site level", 
             "Dispensed - Site level", 
-            "MTL - Site level",
+            "MOS - Site level",
             "National PLHIV on ART", 
             "Regional PLHIV on ART", 
             "Site-level PLHIV on ART",
             "Proj Consumption - Natl (prod)",
             "Proj Consumption - National",
             "Proj Consumption - Regional",
-            "Proj Consumption - Site level"),
+            "Proj Consumption - Site level",
+            "Allocation Tool Format"),
   Description = c(
     "This sheet provides submission rate summary.",
     "This sheet provides summary of National stocks per commodity",
     "This sheet provides summary of National dispensed per commodity",
-    "This sheet contains regional-level SOH as of the reporting period per product with 3-month AMC, computed MTL, and initial alert.",
+    "This sheet contains regional-level SOH as of the reporting period per product with 3-month AMC, computed MOS, and initial alert.",
     "This sheet contains regional-level past 3 months monthly consumption in basic and package unit and also contains 3-months AMC.",
     "This sheet contains site-specific monthly inventory levels by product and expiry date.",
     "This sheet contains site-specific monthly dispensed levels by product.",
-    "This sheet contains site-specific number of PLHIV on ART per ARV, current SOH as of reporting period in basic and package unit, 3-month AMC, computed MTL, and initial alert.",
+    "This sheet contains site-specific number of PLHIV on ART per ARV, current SOH as of reporting period in basic and package unit, 3-month AMC, computed MOS, and initial alert.",
     "This sheet contains National monthly number of PLHIV on ART per product.",
     "This sheet contains Regional monthly number of PLHIV on ART per product.",
     "This sheet contains site-specific monthly number of PLHIV on ART per product.",
     "This sheet contains projected National wastage per commodity in the next six months.",
     "This sheet contains projected National wastage per commodity and date of expiry in the next six months.",
     "This sheet contains projected Regional wastage per commodity and date of expiry in the next six months.",
-    "This sheet contains projected Site-level wastage per commodity and date of expiry in the next six months."
+    "This sheet contains projected Site-level wastage per commodity and date of expiry in the next six months.",
+    "This sheet provides the data formatted to the stocks monitoring and allocation tool excel."
   ),
   stringsAsFactors = FALSE
 )
@@ -1473,20 +1555,21 @@ readme_content <- data.frame(
 # Define the data frames
 data_frames <- list(
   "Submission rate" = sub_rate,
-  "MTL - National" = inv_disp_natl,
+  "MOS - National" = inv_disp_natl,
   "Dispensed - National" = disp_natl,
-  "MTL - Regional" = inv_disp_reg,
+  "MOS - Regional" = inv_disp_reg,
   "Dispensed - Regional" = disp_reg,
   "Inventory - Site level" = inventory,
   "Dispensed - Site level" = disp,
-  "MTL - Site level" = inv_disp_faci,
+  "MOS - Site level" = inv_disp_faci,
   "National PLHIV on ART" = onart_natl,
   "Regional PLHIV on ART" = onart_region,
   "Site-level PLHIV on ART" = onart,
-  "Proj Consumption - Natl (prod)" = fifo_projection_natl_product,
-  "Proj Consumption - National" = fifo_projection_natl,
-  "Proj Consumption - Regional" = fifo_projection_reg,
-  "Proj Consumption - Site level" = fifo_projection
+  "Proj Consumption - Natl (prod)" = fefo_projection_natl_product,
+  "Proj Consumption - National" = fefo_projection_natl,
+  "Proj Consumption - Regional" = fefo_projection_reg,
+  "Proj Consumption - Site level" = fefo_projection,
+  "Allocation Tool Format" = allocation_tool
 )
 
 # Add the "README" sheet as the first sheet
@@ -1562,7 +1645,6 @@ print("Done with Step 6.3")
 library(dplyr)
 library(ggplot2)
 library(scales)  # For comma formatting
-
 # Add 'region' variable to inv_disp_natl
 inv_disp_natl <- inv_disp_natl %>%
   mutate(region = "PH")
@@ -1570,7 +1652,7 @@ inv_disp_natl <- inv_disp_natl %>%
 # Append inv_disp_natl to inv_disp_reg
 inv_disp_reg <- bind_rows(inv_disp_reg, inv_disp_natl)
 
-# Define product renaming mapping
+# Define relevant products and renaming mapping
 product_rename <- c(
   "Pre-exposure Prophylaxis" = "PrEP",
   "HIV Self Test" = "HIV STK",
@@ -1581,104 +1663,94 @@ product_rename <- c(
   "HIV VIRAL LOAD Point of Care Cartridge" = "VL POC"
 )
 
-# Define relevant products and their new order
-relevant_products <- names(product_rename)
-product_order <- unname(product_rename)
-
 # Filter for relevant products
 inv_disp_reg_filtered <- inv_disp_reg %>%
-  filter(product %in% relevant_products)
+  filter(product %in% names(product_rename)) %>%
+  mutate(product = product_rename[product])
 
-# Rename products using the mapping
-inv_disp_reg_filtered$product <- product_rename[inv_disp_reg_filtered$product]
-
-# Define custom region order (in reverse so RO1 appears on top)
+# Define custom region order
 region_order <- rev(c(
   "PH", "RO1", "RO2", "CAR", "RO3", "NCR", "R4A", "R4B", "RO5",
   "RO6", "NIR", "RO7", "RO8", "RO9", "R10", "R11", "R12", "CARAGA", "BARMM"
 ))
 
-# Create the dashboard data by region and product
+# Define stock level categories dynamically
+inv_disp_reg_filtered <- inv_disp_reg_filtered %>%
+  mutate(stock_level = case_when(
+    is.infinite(MOS_amc3) | is.na(MOS_amc3) ~ "No report / Check consumption data",
+    MOS_amc3 < cutoff_values$critical ~ "Critical level! Urgent allocation",
+    MOS_amc3 >= cutoff_values$critical & MOS_amc3 < cutoff_values$low_stock ~ "Low stock! Prepare allocation",
+    MOS_amc3 >= cutoff_values$low_stock & MOS_amc3 < cutoff_values$moderate_stock ~ "Moderate stock. Monitor closely",
+    MOS_amc3 >= cutoff_values$moderate_stock ~ "Oversupply. Verify data with CHD/Site. Re-align if needed.",
+    TRUE ~ NA_character_
+  ))
+
+# Ensure factor levels for ordering
+inv_disp_reg_filtered$region <- factor(inv_disp_reg_filtered$region, levels = region_order)
+inv_disp_reg_filtered$product <- factor(inv_disp_reg_filtered$product, levels = unname(product_rename))
+
+# Define color mapping for stock levels
+stock_colors <- c(
+  "Critical level! Urgent allocation" = "#c43d4d",
+  "Low stock! Prepare allocation" = "#f2bc40",
+  "Moderate stock. Monitor closely" = "#1e87a5",
+  "Oversupply. Verify data with CHD/Site. Re-align if needed." = "#287c67",
+  "No report / Check consumption data" = "gray"
+)
+
+# Construct dashboard data
 dashboard_data <- inv_disp_reg_filtered %>%
   group_by(region, product) %>%
   summarise(
-    avg_amc_3_basic = mean(amc_3_basic, na.rm = TRUE),
-    avg_MTL_amc3 = mean(MTL_amc3, na.rm = TRUE),
-    stock_level = first(alert_amc3),  # Assuming alert is the same for all products in a region
-    Package = first(Package),  # Retrieve the package value
-    MTL = first(MTL_amc3),  # Retrieve the MTL value
+    avg_MOS_amc3 = mean(MOS_amc3, na.rm = TRUE),
+    stock_level = first(stock_level),  # Assuming stock level is uniform in a region
+    Package = first(Package),
+    MOS = first(MOS_amc3),
     .groups = 'drop'
-  ) %>%
-  mutate(stock_level = 
-           case_when(
-             stock_level == "Critical level! Urgent allocation" ~ "Critical level! Urgent allocation (<4 MTL)",
-             stock_level == "Low stock! Prepare allocation" ~ "Low stock! Prepare allocation (4-6 MTL)",
-             stock_level == "Moderate stock. Monitor closely" ~ "Moderate stock. Monitor closely (7-9 MTL)",
-             stock_level == "Oversupply. Verify data with CHD. Re-align if needed." ~ "Oversupply. Verify data with CHD. Re-align if needed. (10+ MTL)",
-             TRUE ~ stock_level
-           ))
+  )
 
-# Ensure the region and product are in the specified order
-dashboard_data$region <- factor(dashboard_data$region, levels = region_order)
-dashboard_data$product <- factor(dashboard_data$product, levels = product_order)
+# Ensure stock level is a factor for ggplot
+dashboard_data$stock_level <- factor(dashboard_data$stock_level, levels = names(stock_colors))
 
-# Define a color palette based on stock levels
-dashboard_data$stock_level_color <- case_when(
-  dashboard_data$stock_level == "Critical level! Urgent allocation (<4 MTL)" ~ "#c43d4d",
-  dashboard_data$stock_level == "Low stock! Prepare allocation (4-6 MTL)" ~ "#f2bc40",
-  dashboard_data$stock_level == "Moderate stock. Monitor closely (7-9 MTL)" ~ "#1e87a5",
-  dashboard_data$stock_level == "Oversupply. Verify data with CHD. Re-align if needed. (10+ MTL)" ~ "#287c67",
-  TRUE ~ "white"
-)
-
-# Format labels with handling for NA and Inf values
+# Format labels
 dashboard_data$label_text <- ifelse(
-  is.na(dashboard_data$Package) & is.na(dashboard_data$MTL), 
+  is.na(dashboard_data$Package) & is.na(dashboard_data$MOS),
   "No report",
-  ifelse(is.infinite(dashboard_data$MTL), 
-         sprintf("%s (No consumption reported)", comma(dashboard_data$Package)), 
-         sprintf("%s (%s MTL)", comma(dashboard_data$Package), comma(dashboard_data$MTL)))
+  ifelse(is.infinite(dashboard_data$MOS),
+         sprintf("%s (No consumption reported)", comma(dashboard_data$Package)),
+         sprintf("%s (%s MOS)", comma(dashboard_data$Package), comma(dashboard_data$MOS)))
 )
 
-# Plot the data using geom_tile and add formatted labels, along with a legend
+# Plot data using geom_tile
 plot_regional <- ggplot(dashboard_data, aes(x = product, y = region, fill = stock_level)) +
   geom_tile() +
-  scale_fill_manual(values = c(
-    "Critical level! Urgent allocation (<4 MTL)" = "#c43d4d",
-    "Low stock! Prepare allocation (4-6 MTL)" = "#f2bc40",
-    "Moderate stock. Monitor closely (7-9 MTL)" = "#1e87a5",
-    "Oversupply. Verify data with CHD. Re-align if needed. (10+ MTL)" = "#287c67"
-  )) + # Manually define colors for the legend
-  geom_text(aes(label = label_text), 
-            color = "white", 
-            size = 4) +  # Centered text
+  scale_fill_manual(values = stock_colors) +
+  geom_text(aes(label = label_text), color = "white", size = 4) +
   labs(
-    title = paste("Months-to-last (MTL) Heatmap by Region and Product as of",reporting_month,"2025", sep = " "),
+    title = paste("Months-of-supply (MOS) Heatmap by Region and Product as of", reporting_month, "2025"),
     x = "Product",
     y = "Region",
-    fill = "Stock Level",  # Label for the legend
+    fill = "Stock Level",
     subtitle = "Values presented are the available units of package and months-to-last"
   ) +
-  theme_minimal() +  # Apply minimal theme
+  theme_minimal() +
   theme(
     axis.text.x = element_text(angle = 0, hjust = 1),
     axis.text.y = element_text(size = 10),
-    plot.title = element_text(hjust = 0.5),  # Center the title
-    legend.position = "bottom"  # Place legend at bottom
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom"
   )
 
-# Construct the file name
-file_name <- paste("regional_", reporting_month, "2025", sep = "_") 
-
-# Define the file path
+# Construct the file path
+file_name <- paste("regional_", reporting_month, "2025", sep = "_")
 file_path <- paste("Consolidated/", file_name, ".pdf", sep = "")
 
-# Export the plot as a 16:9 slide to PDF
+
+# Save the plot
 ggsave(file_path, plot = plot_regional, width = 16, height = 9, units = "in", dpi = 300)
 
-# Check that the file has been saved
+# Confirm file save
 print(paste("Plot saved to:", file_path))
-
 ```
 
 ## Part 8: Saving the files for future use
