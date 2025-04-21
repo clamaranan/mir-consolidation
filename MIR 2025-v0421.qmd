@@ -796,28 +796,16 @@ p3m <- if (amc_index >= 3) month_order[(amc_index - 2):amc_index] else character
 p6m <- if (amc_index >= 6) month_order[(amc_index - 5):amc_index] else character(0)
 
 disp <- disp %>%
-  mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
-  mutate(
-    sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
-    count = rowSums(!is.na(select(., all_of(p3m)))),
-    amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
-    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
-  ) %>%
-  mutate(amc_6_basic = NA)
+    mutate(amc_3_basic = round(rowMeans(select(., all_of(p3m)), na.rm = TRUE))) %>%
+      mutate(amc_3_package = round(amc_3_basic / numeric_unit, 2)) %>%
+  mutate(amc_6_basic = NA,
+         amc_6_package = NA)
 
 # Only compute sum6, count6, amc_6_basic if amc_index >= 6
 if (amc_index >= 6) {
   disp <- disp %>%
-    mutate(
-      sum6 = rowSums(select(., all_of(p6m)), na.rm = TRUE),
-      count6 = rowSums(!is.na(select(., all_of(p6m)))),
-      amc_6_basic = ifelse(is.nan(round(sum6 / count6, 1)), 0, round(sum6 / count6, 1)),
-      amc_6_package = ifelse(is.nan(round(amc_6_basic / numeric_unit, 1)), 0, round(amc_6_basic / numeric_unit, 1))
-    ) %>%
-    select(-sum, -count, -sum6, -count6)
-} else {
-  disp <- disp %>%
-    select(-sum, -count)  # Remove unnecessary columns
+      mutate(amc_6_basic = round(rowMeans(select(., all_of(p6m)), na.rm = TRUE))) %>%
+      mutate(amc_6_package = round(amc_6_basic / numeric_unit, 2)) 
 }
 
 print("End of Step 4.4: Computing for the average monthly consumption (site-level)")
@@ -829,33 +817,23 @@ At this point, we've added columns on *disp* dataframe for amc_3 and amc_6 for b
 
 ```{r}
 
-
 # --- Regional Level ---
 disp_reg <- disp %>%
   group_by(region, numeric_unit, product) %>%
   summarise(across(all_of(month_order), sum, na.rm = TRUE), .groups = "drop") %>%
-  mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
   mutate(
-    sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
-    count = rowSums(!is.na(select(., all_of(p3m)))),
-    amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
-    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
-  ) %>%
-  mutate(amc_6_basic = NA)
+    amc_3_basic = round(rowMeans(select(., all_of(p3m)), na.rm = TRUE), 1),
+    amc_3_package = round(amc_3_basic / numeric_unit, 1),
+    amc_6_basic = NA, 
+    amc_6_package = NA
+  )
 
-# Compute AMC-6 only if amc_index >= 6
 if (amc_index >= 6) {
   disp_reg <- disp_reg %>%
     mutate(
-      sum6 = rowSums(select(., all_of(p6m)), na.rm = TRUE),
-      count6 = rowSums(!is.na(select(., all_of(p6m)))),
-      amc_6_basic = ifelse(is.nan(round(sum6 / count6, 1)), 0, round(sum6 / count6, 1)),
-      amc_6_package = ifelse(is.nan(round(amc_6_basic / numeric_unit, 1)), 0, round(amc_6_basic / numeric_unit, 1))
-    ) %>%
-    select(-sum, -count, -sum6, -count6)
-} else {
-  disp_reg <- disp_reg %>%
-    select(-sum, -count)
+      amc_6_basic = round(rowMeans(select(., all_of(p6m)), na.rm = TRUE), 1),
+      amc_6_package = round(amc_6_basic / numeric_unit, 1)
+    )
 }
 
 # --- National Level ---
@@ -864,29 +842,22 @@ disp_natl <- disp %>%
   summarise(across(all_of(month_order), sum, na.rm = TRUE), .groups = "drop") %>%
   mutate(across(all_of(month_order), ~ ifelse(. == 0, NA, .))) %>%
   mutate(
-    sum = rowSums(select(., all_of(p3m)), na.rm = TRUE),
-    count = rowSums(!is.na(select(., all_of(p3m)))),
-    amc_3_basic = ifelse(is.nan(round(sum / count, 1)), 0, round(sum / count, 1)),
-    amc_3_package = ifelse(is.nan(round(amc_3_basic / numeric_unit, 1)), 0, round(amc_3_basic / numeric_unit, 1))
-  ) %>%
-  mutate(amc_6_basic = NA)
+    amc_3_basic = round(rowMeans(select(., all_of(p3m)), na.rm = TRUE), 1),
+    amc_3_package = round(amc_3_basic / numeric_unit, 1),
+    amc_6_basic = NA,
+    amc_6_package = NA
+  )
 
-# Compute AMC-6 only if amc_index >= 6
 if (amc_index >= 6) {
   disp_natl <- disp_natl %>%
     mutate(
-      sum6 = rowSums(select(., all_of(p6m)), na.rm = TRUE),
-      count6 = rowSums(!is.na(select(., all_of(p6m)))),
-      amc_6_basic = ifelse(is.nan(round(sum6 / count6, 1)), 0, round(sum6 / count6, 1)),
-      amc_6_package = ifelse(is.nan(round(amc_6_basic / numeric_unit, 1)), 0, round(amc_6_basic / numeric_unit, 1))
-    ) %>%
-    select(-sum, -count, -sum6, -count6)
-} else {
-  disp_natl <- disp_natl %>%
-    select(-sum, -count)
+      amc_6_basic = round(rowMeans(select(., all_of(p6m)), na.rm = TRUE), 1),
+      amc_6_package = round(amc_6_basic / numeric_unit, 1)
+    )
 }
 
 print("End of Step 4.5: Computing for the average monthly consumption (regional/national)")
+
 ```
 
 We now have three disp data frames:
@@ -1468,9 +1439,6 @@ fefo_inventory <- function(data) {
       # Remaining stock after consumption
       remaining_stock = stock - fefo_consumed,  
       
-      # Wasted stock (if expired)
-      wastage = ifelse(expiry_end < (analysis_start_date + months(6)) & remaining_stock > 0, remaining_stock, 0),  
-      
       # Flag for batches that will expire
       will_expire = ifelse(remaining_stock > 0, "Will Expire", "Consumed")  
     ) %>%
@@ -1481,8 +1449,8 @@ fefo_inventory <- function(data) {
 fefo_projection <- fefo_inventory(expiry)
 
 fefo_projection <- fefo_projection %>%
-  select(region, FacilityName, hub, filename, product, numeric_unit, unit_description, expiry,expiry_end, reporting_month, filename, amc_3_basic, fefo_consumed, remaining_stock, wastage, will_expire) %>%
-  mutate(wastage_package = round(wastage/numeric_unit),0)
+  select(region, FacilityName, hub, filename, product, numeric_unit, unit_description, expiry,expiry_end, reporting_month, filename, amc_3_basic, fefo_consumed, remaining_stock,  will_expire) %>%
+  mutate(remaining_stock_package = round(remaining_stock/numeric_unit,0))
 
 
 
@@ -1491,19 +1459,19 @@ fefo_projection <- fefo_projection %>%
 
 fefo_projection_reg <- fefo_projection %>%
   group_by(region, product, numeric_unit, expiry_end, ) %>%
-  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
+  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
+  select(-amc_3_basic) 
+
+  
   
 
 # Creating national summary
 
 fefo_projection_natl <- fefo_projection %>%
   group_by(product, numeric_unit,  expiry_end, ) %>%
-  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
+  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") %>%
+  select(-amc_3_basic) 
   
-
-fefo_projection_natl_product <- fefo_projection %>%
-  group_by(product, numeric_unit) %>%
-  summarise(across(where(is.numeric) & !contains("numeric_unit"), sum, na.rm = TRUE), .groups = "drop") 
 
 cat("\n","Done with Step 6.2")
 ```
@@ -1526,7 +1494,6 @@ readme_content <- data.frame(
             "National PLHIV on ART", 
             "Regional PLHIV on ART", 
             "Site-level PLHIV on ART",
-            "Proj Consumption - Natl (prod)",
             "Proj Consumption - National",
             "Proj Consumption - Regional",
             "Proj Consumption - Site level",
@@ -1543,7 +1510,6 @@ readme_content <- data.frame(
     "This sheet contains National monthly number of PLHIV on ART per product.",
     "This sheet contains Regional monthly number of PLHIV on ART per product.",
     "This sheet contains site-specific monthly number of PLHIV on ART per product.",
-    "This sheet contains projected National wastage per commodity in the next six months.",
     "This sheet contains projected National wastage per commodity and date of expiry in the next six months.",
     "This sheet contains projected Regional wastage per commodity and date of expiry in the next six months.",
     "This sheet contains projected Site-level wastage per commodity and date of expiry in the next six months.",
@@ -1565,7 +1531,6 @@ data_frames <- list(
   "National PLHIV on ART" = onart_natl,
   "Regional PLHIV on ART" = onart_region,
   "Site-level PLHIV on ART" = onart,
-  "Proj Consumption - Natl (prod)" = fefo_projection_natl_product,
   "Proj Consumption - National" = fefo_projection_natl,
   "Proj Consumption - Regional" = fefo_projection_reg,
   "Proj Consumption - Site level" = fefo_projection,
