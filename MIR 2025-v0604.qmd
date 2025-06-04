@@ -74,7 +74,7 @@ replace the month in "[Mon]{.underline}" using the notation below
 ```{r}
 
 # Define Reporting Month 
-reporting_month <- "Feb" # <- replace this 
+reporting_month <- "Mar" # <- replace this 
 
 #Select from the following  
 #Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec
@@ -1476,7 +1476,230 @@ fefo_projection_natl <- fefo_projection %>%
 cat("\n","Done with Step 6.2")
 ```
 
-### Step 6.3: Exporting to Excel {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+## Part 7: SC Data Sheet {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+### Step 7.1: Extract data from SC Data {data-link="Step 1.3: Extract facility names from General Input Sheet"}
+
+Similar with the inventory process, let's generate a **scdata** dataframe. This might take a while because of the volume of files to be processed.
+
+```{r,message=FALSE,echo=FALSE,results='hide'}
+
+# Define a function to read the specific range and keep all columns as text first
+read_scdata_range <- function(file) {
+  df <- tryCatch(
+    {
+      read_excel(file, sheet = "SC Data", range = "B5:BW58", col_types = "text", .name_repair = "unique_quiet")
+    },
+    error = function(e) {
+      message(paste("Error reading file:", file, "- Sheet 'SC Data' not found."))
+      return(NULL)
+    }
+  )
+  if (is.null(df)) return(NULL)
+  
+  # Standardize column names as temporary generic names
+  colnames(df) <- paste0("Column", 1:ncol(df))
+  
+  # Replace NA with "0" (text 0) for columns 3 to 74 (where data resides)
+  df <- df %>% mutate(across(3:74, ~ replace(., is.na(.), "0")))
+  
+  # Rename the first two columns explicitly
+  colnames(df)[1:2] <- c("product", "unit")
+  
+  # Generate month and metric names
+  months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+  metrics <- c("qty_received", "wastage", "stockout_date",
+               "receipt_date", "order_not_fulfilled", "order_total")
+  
+  # Build the full list of month_metric column names
+  month_cols <- c()
+  for (month in months) {
+    for (metric in metrics) {
+      month_cols <- c(month_cols, paste0(month, ".", metric))
+    }
+  }
+  
+  # Assign the final column names (product, unit, then month_metric columns)
+  colnames(df) <- c("product", "unit", month_cols)
+  
+  # Add the file name column at the end
+  df <- df %>% mutate(FileName = basename(file))
+  
+  return(df)
+}
+
+# Apply function to all Excel files and combine into one data frame
+scdata_data_list <- map(excel_files, read_scdata_range)
+
+# Combine all data frames into one (row-bind)
+scdata <- bind_rows(scdata_data_list)
+
+
+# Combine all data frames into one (row-bind)
+scdata <- bind_rows(scdata_data_list)
+
+# Pivot longer by month blocks, then pivot wider to separate metrics
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+metrics <- c("qty_received", "wastage", "stockout_date",
+             "receipt_date", "order_not_fulfilled", "order_total")
+
+# Build regex pattern for columns per month
+month_pattern <- paste0("^(", paste(months, collapse = "|"), ")_(", paste(metrics, collapse = "|"), ")$")
+
+
+scdata_long <- scdata %>%
+  pivot_longer(
+    cols = -c(product, unit, FileName),
+    names_to = c("month", "metric"),
+    names_pattern = "(.*)\\.(.*)",  # split on literal dot
+    values_to = "value"
+  ) %>%
+  pivot_wider(
+    names_from = metric,
+    values_from = value
+  )
+
+#####
+
+# Define your numeric metrics
+numeric_metrics <- c("qty_received", "wastage", "order_not_fulfilled", "order_total")
+
+
+# Loop through only the numeric columns and create cleaned + non-numeric character columns
+
+for (col in numeric_metrics) {
+  cleaned_col <- paste0(col, "_cleaned")
+  non_numeric_col <- paste0(col, "_non_numeric")
+  
+  scdata_long <- scdata_long %>%
+    mutate(
+      temp_split = str_match(!!sym(col), "^([0-9,. ]+)(.*)$"),
+      # Remove commas and spaces, convert numeric part
+      !!cleaned_col := suppressWarnings(as.numeric(gsub("[, ]", "", temp_split[,2]))),
+      
+      # Capture everything after the numeric part as non-numeric (including spaces)
+      !!non_numeric_col := str_trim(temp_split[,3])
+    ) %>%
+    select(-temp_split)  # Drop the temporary column if you want
+}
+
+
+
+# Create a tag column to indicate rows with non-numeric characters in any month columns
+scdata_long <- scdata_long %>%
+  mutate(
+    has_string = rowSums(select(., ends_with("_non_numeric")) %>%
+                           mutate(across(everything(), ~ !is.na(.)))) > 0  # Check if any month column has non-numeric
+  )
+
+# Identify all columns with `_non_numeric` suffix
+non_numeric_cols <- grep("_non_numeric$", colnames(scdata_long), value = TRUE)
+
+# Combine the content of `_non_numeric` columns into a single column called `combined_non_numeric`
+scdata_long <- scdata_long %>%
+  unite("combined_non_numeric", all_of(non_numeric_cols), na.rm = TRUE, remove = TRUE, sep = "; ")
+
+
+# Print the string captured
+cat("\n","Captured Non-numeric Values", "\n")
+unique(scdata_long$combined_non_numeric)
+
+
+sc_data <- scdata_long
+rm(scdata,scdata_data_list,scdata_long)
+
+
+
+#### FORDA DATE
+date_cols <- c("stockout_date", "receipt_date")
+
+for (col in date_cols) {
+  num_col <- paste0(col, "_num")
+  parsed_col <- paste0("date_", sub("_date$", "", col))
+  
+  sc_data <- sc_data %>%
+    mutate(
+      !!num_col := parse_number(.data[[col]]),
+      !!parsed_col := case_when(
+        !is.na(.data[[num_col]]) & .data[[num_col]] >= 45000  & .data[[num_col]] <= 55000 ~ as.Date(excel_numeric_to_date(.data[[num_col]])),
+        grepl("^[A-Za-z]{3}-\\d{2}$", .data[[col]]) ~ as.Date(paste0("1-", .data[[col]]), format = "%d-%b-%y"),
+        TRUE ~ NA_Date_
+      )
+    )
+}
+
+
+sc_data <- sc_data %>%
+  rename(
+    # Rename columns
+    string_qty_received = qty_received,
+    string_wastage = wastage,
+    string_stockout_date = stockout_date,
+    string_receipt_date = receipt_date,
+    string_order_not_fulfilled = order_not_fulfilled,
+    string_order_total = order_total,
+    qty_received = qty_received_cleaned,
+    wastage = wastage_cleaned,
+    order_not_fulfilled = order_not_fulfilled_cleaned,
+    order_total = order_total_cleaned,
+    stockout_date = date_stockout,
+    receipt_date = date_receipt) %>%
+  filter(!if_all(
+    c(
+      string_qty_received,
+      string_wastage,
+      string_stockout_date,
+      string_receipt_date,
+      string_order_not_fulfilled,
+      string_order_total
+    ),
+    ~ . == "0"
+  ))
+
+
+sc_data <- sc_data %>%
+  mutate(
+    filename = FileName,  # Retain the original FileName for processing
+    region = substr(FileName, 1, 3),  # Extract the first 3 characters for 'region'
+    hub = str_trim(substr(FileName, 5, nchar(FileName)))) %>%  # Extract from 5th character onward and trim spaces
+  
+  # Remove the leading " - " in hub and clean up the extension
+  mutate(
+    hub = str_replace(hub, "- ", ""),  # Remove leading "- " from hub
+    hub = str_replace(hub, "– ", ""),  # Remove leading "– " from hub
+    hub = str_replace(hub, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from hub
+    FileName = str_replace(FileName, "\\.xlsx$", ""),  # Remove the ".xlsx" extension from FileName
+    region = str_replace_all(region, "R0", "RO")) %>% # Replace all '0' with 'O' in the 'region' column
+  select(
+    month,
+    region,
+    hub,
+    product,
+    unit,
+    FileName,
+    qty_received,
+    wastage,
+    stockout_date,
+    receipt_date,
+    order_not_fulfilled,
+    order_total,
+    combined_non_numeric,
+    has_string,
+    string_qty_received,
+    string_wastage,
+    string_stockout_date,
+    string_receipt_date,
+    string_order_not_fulfilled,
+    string_order_total
+  ) 
+
+```
+
+#### -\> This printed the list of string in the numeric columns. You can review and edit later in the export.
+
+## Part 8: Exporting to Excel {data-link="Step 1.3: Extract facility names from General Input Sheet"}
 
 ```{r}
 
@@ -1497,7 +1720,8 @@ readme_content <- data.frame(
             "Proj Consumption - National",
             "Proj Consumption - Regional",
             "Proj Consumption - Site level",
-            "Allocation Tool Format"),
+            "Allocation Tool Format",
+            "SC Data"),
   Description = c(
     "This sheet provides submission rate summary.",
     "This sheet provides summary of National stocks per commodity",
@@ -1513,7 +1737,8 @@ readme_content <- data.frame(
     "This sheet contains projected National wastage per commodity and date of expiry in the next six months.",
     "This sheet contains projected Regional wastage per commodity and date of expiry in the next six months.",
     "This sheet contains projected Site-level wastage per commodity and date of expiry in the next six months.",
-    "This sheet provides the data formatted to the stocks monitoring and allocation tool excel."
+    "This sheet provides the data formatted to the stocks monitoring and allocation tool excel.",
+    "This sheet consolidated SC Data tab"
   ),
   stringsAsFactors = FALSE
 )
@@ -1534,7 +1759,8 @@ data_frames <- list(
   "Proj Consumption - National" = fefo_projection_natl,
   "Proj Consumption - Regional" = fefo_projection_reg,
   "Proj Consumption - Site level" = fefo_projection,
-  "Allocation Tool Format" = allocation_tool
+  "Allocation Tool Format" = allocation_tool,
+  "SC Data" = sc_data
 )
 
 # Add the "README" sheet as the first sheet
@@ -1600,10 +1826,10 @@ saveWorkbook(wb, output_file, overwrite = TRUE)
 # Print confirmation message
 cat("Workbook saved to:", output_file, "\n")
 
-print("Done with Step 6.3")
+print("Done with Part 8")
 ```
 
-## Part 7: Generating a regional summary
+## Part 9: Generating a regional summary
 
 ```{r}
 # Load required libraries
@@ -1636,7 +1862,7 @@ inv_disp_reg_filtered <- inv_disp_reg %>%
 # Define custom region order
 region_order <- rev(c(
   "PH", "RO1", "RO2", "CAR", "RO3", "NCR", "R4A", "R4B", "RO5",
-  "RO6", "NIR", "RO7", "RO8", "RO9", "R10", "R11", "R12", "CARAGA", "BARMM"
+  "RO6", "NIR", "RO7", "RO8", "RO9", "R10", "R11", "R12", "CARAGA", "CRG", "BARMM"
 ))
 
 # Define stock level categories dynamically
@@ -1718,7 +1944,7 @@ ggsave(file_path, plot = plot_regional, width = 16, height = 9, units = "in", dp
 print(paste("Plot saved to:", file_path))
 ```
 
-## Part 8: Saving the files for future use
+## Part 10: Saving the files for future use
 
 ```{r}
 output_dir <- file.path(getwd(), "R File Output")
